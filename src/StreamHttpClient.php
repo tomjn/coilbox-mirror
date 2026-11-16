@@ -107,7 +107,7 @@ final class StreamHttpClient implements HttpClient
         if ($body === false || ($maxBytes !== null && strlen($body) > $maxBytes)) {
             return new HttpResponse(0, '');
         }
-        return new HttpResponse(self::status(), $body);
+        return new HttpResponse(self::status(), $body, self::headers());
     }
 
     /** Redirects add earlier status lines, so the last one is the final response. */
@@ -120,5 +120,23 @@ final class StreamHttpClient implements HttpClient
             }
         }
         return $status;
+    }
+
+    /**
+     * Returns the headers of the final response only, with lowercase names.
+     *
+     * @return array<string, string>
+     */
+    private static function headers(): array
+    {
+        $headers = [];
+        foreach (http_get_last_response_headers() ?? [] as $line) {
+            if (str_starts_with($line, 'HTTP/')) {
+                $headers = [];
+            } elseif (preg_match('/^([^:\s]+):\s*(.*)$/', $line, $m) === 1) {
+                $headers[strtolower($m[1])] = $m[2];
+            }
+        }
+        return $headers;
     }
 }
