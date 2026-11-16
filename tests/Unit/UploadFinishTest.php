@@ -340,17 +340,16 @@ final class UploadFinishTest extends TestCase
         $this->assertSame(200, $this->post('abcd', '0')->status);
         // A folder where disk.lock should be makes Lock::acquire throw.
         mkdir($this->paths->state() . '/disk.lock');
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('disk.lock');
         set_error_handler(static fn(): bool => true);
         try {
             $this->post('efghij', '4');
-            $this->fail('Expected the finish to throw');
-        } catch (\RuntimeException $e) {
-            $this->assertStringContainsString('disk.lock', $e->getMessage());
         } finally {
             restore_error_handler();
+            $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
+            $this->assertFileDoesNotExist($this->paths->maps() . '/test.sd7');
         }
-        $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
-        $this->assertFileDoesNotExist($this->paths->maps() . '/test.sd7');
     }
 
     public function test_failed_listing_write_keeps_the_201_and_skips_the_report(): void

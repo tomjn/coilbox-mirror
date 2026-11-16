@@ -371,7 +371,9 @@ The mirror verifies a catalogue in this order. The first failure rejects it. A r
 4. If the mirror holds a catalogue, and `seq` is an integer, `seq` must be greater than the held one. An equal `seq` is also rejected. Otherwise reject as `not_newer`.
 5. Check the shape rules above. Otherwise reject as `malformed`.
 
-After an accepted catalogue with a `next_key`, the mirror saves that key in `private/state/hub_keys.json` and trusts it from then on.
+After an accepted catalogue with a `next_key`, the mirror saves that key in `private/state/hub_keys.json` and trusts it from then on. It saves the key before it stores the catalogue, so a mirror never reports a `catalogue_seq` while still refusing tokens signed by that catalogue's new key.
+
+The mirror records the accepted `seq` in `private/state/catalogue_seq` and checks step 4 against that file, not against the public `catalogue.json`. If the state file is damaged, or is missing while `catalogue.json` cannot be read, the mirror refuses every catalogue until its operator repairs the files. It does not fall back to accepting any seq.
 
 ### Key rotation
 

@@ -20,10 +20,36 @@ final class CatalogueStore
         return $raw === false ? null : Json::decodeObject($raw);
     }
 
+    /**
+     * Returns the seq of the held catalogue, or null when the mirror has never held one.
+     *
+     * The seq lives in private/state/catalogue_seq, because catalogue.json sits in the web root where anyone
+     * with write access there could swap it for an older one. A catalogue.json with no state file comes from an
+     * install made before the state file existed, so its seq is used once.
+     *
+     * This fails closed. A damaged state file, or a catalogue.json that cannot be read with no state file to
+     * fall back on, throws instead of returning null, because null would let any older signed catalogue in.
+     *
+     * @throws \RuntimeException when the seq cannot be known
+     */
     public function heldSeq(): ?int
     {
+        $raw = @file_get_contents($this->seqFile());
+        if ($raw !== false) {
+            $seq = filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($seq === false || $raw !== (string) $seq) {
+                throw new \RuntimeException('private/state/catalogue_seq is damaged, so no catalogue can be checked as newer. Put the seq of the held catalogue in it, or delete it together with catalogue.json and catalogue.sig to accept the next signed catalogue.');
+            }
+            return $seq;
+        }
+        if (!file_exists($this->paths->catalogueJson())) {
+            return null;
+        }
         $seq = $this->held()['seq'] ?? null;
-        return is_int($seq) ? $seq : null;
+        if (!is_int($seq)) {
+            throw new \RuntimeException('catalogue.json cannot be read and private/state/catalogue_seq is missing, so no catalogue can be checked as newer. Delete catalogue.json and catalogue.sig to accept the next signed catalogue.');
+        }
+        return $seq;
     }
 
     /** @return list<string> raw public keys from the config, then from hub_keys.json */
@@ -47,12 +73,17 @@ final class CatalogueStore
     public function accept(string $json, string $sigText): array
     {
         $catalogue = Catalogue::verify($json, $sigText, $this->trustedKeys(), $this->heldSeq());
-        self::writeAtomic($this->paths->catalogueJson(), $json);
-        self::writeAtomic($this->paths->catalogueSig(), $sigText);
+        // Save the key first. A mirror that showed the new seq while refusing tokens signed by the new key
+        // would tell the hub it had moved over when it had not.
         if (isset($catalogue['next_key'])) {
             // verify() has already checked this key, so it decodes.
             $this->saveKey(B64::decode($catalogue['next_key']['public_key']));
         }
+        // Record the seq before the catalogue. If the catalogue write then fails, the mirror refuses this seq
+        // again and keeps its older catalogue until a newer one comes, which is safer than going back a seq.
+        self::writeAtomic($this->seqFile(), (string) $catalogue['seq']);
+        self::writeAtomic($this->paths->catalogueJson(), $json);
+        self::writeAtomic($this->paths->catalogueSig(), $sigText);
         return $catalogue;
     }
 
@@ -96,6 +127,11 @@ final class CatalogueStore
         }
         $texts = array_map(B64::encode(...), [...$this->savedKeys(), $key]);
         self::writeAtomic($this->keysFile(), Json::encode($texts));
+    }
+
+    private function seqFile(): string
+    {
+        return $this->paths->state() . '/catalogue_seq';
     }
 
     private function keysFile(): string

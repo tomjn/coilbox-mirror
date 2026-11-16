@@ -173,7 +173,101 @@ final class CatalogueStoreTest extends TestCase
         $store = $this->store(Signer::keypair(1)['public']);
         file_put_contents($this->paths->catalogueJson(), '<html>');
         $this->assertNull($store->held());
-        $this->assertNull($store->heldSeq());
+    }
+
+    public function test_accept_records_the_seq_in_private_state(): void
+    {
+        $k1 = Signer::keypair(1);
+        $store = $this->store($k1['public']);
+        [$json, $sig] = $this->signed(CatalogueTest::doc(7), $k1['secret']);
+        $store->accept($json, $sig);
+        $this->assertSame('7', file_get_contents($this->paths->state() . '/catalogue_seq'));
+        $this->assertSame([], glob($this->paths->state() . '/*.tmp'));
+    }
+
+    public function test_damaged_catalogue_json_keeps_the_not_newer_check(): void
+    {
+        $k1 = Signer::keypair(1);
+        $store = $this->store($k1['public']);
+        [$json, $sig] = $this->signed(CatalogueTest::doc(7), $k1['secret']);
+        $store->accept($json, $sig);
+        file_put_contents($this->paths->catalogueJson(), '<html>');
+
+        $this->assertSame(7, $store->heldSeq());
+        [$old, $oldSig] = $this->signed(CatalogueTest::doc(6), $k1['secret']);
+        try {
+            $store->accept($old, $oldSig);
+            $this->fail('Expected CatalogueRejected');
+        } catch (CatalogueRejected $e) {
+            $this->assertSame('not_newer', $e->reason);
+        }
+    }
+
+    public function test_catalogue_held_before_the_state_file_existed_still_gives_its_seq(): void
+    {
+        $k1 = Signer::keypair(1);
+        $store = $this->store($k1['public']);
+        [$json, $sig] = $this->signed(CatalogueTest::doc(7), $k1['secret']);
+        $store->accept($json, $sig);
+        unlink($this->paths->state() . '/catalogue_seq');
+
+        $this->assertSame(7, $store->heldSeq());
+    }
+
+    public function test_unreadable_catalogue_with_no_state_file_refuses_every_catalogue(): void
+    {
+        $k1 = Signer::keypair(1);
+        $store = $this->store($k1['public']);
+        file_put_contents($this->paths->catalogueJson(), '<html>');
+        [$json, $sig] = $this->signed(CatalogueTest::doc(1), $k1['secret']);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('catalogue_seq');
+        try {
+            $store->accept($json, $sig);
+        } finally {
+            $this->assertSame('<html>', file_get_contents($this->paths->catalogueJson()));
+            $this->assertFileDoesNotExist($this->paths->state() . '/catalogue_seq');
+        }
+    }
+
+    public function test_damaged_state_file_refuses_every_catalogue(): void
+    {
+        $k1 = Signer::keypair(1);
+        $store = $this->store($k1['public']);
+        file_put_contents($this->paths->state() . '/catalogue_seq', 'junk');
+        [$json, $sig] = $this->signed(CatalogueTest::doc(1), $k1['secret']);
+        $this->expectException(\RuntimeException::class);
+        try {
+            $store->accept($json, $sig);
+        } finally {
+            $this->assertFileDoesNotExist($this->paths->catalogueJson());
+        }
+    }
+
+    public function test_failed_key_save_leaves_the_held_catalogue_alone(): void
+    {
+        $k1 = Signer::keypair(1);
+        $k2 = Signer::keypair(2);
+        $store = $this->store($k1['public']);
+        // A folder where hub_keys.json should be makes the key save fail.
+        mkdir($this->paths->state() . '/hub_keys.json');
+        $doc = CatalogueTest::doc(2);
+        $doc['next_key'] = [
+            'public_key' => B64::encode($k2['public']),
+            'sig' => Signer::sign(Crypto::CTX_HUB_KEY, $k2['public'], $k1['secret']),
+        ];
+        [$json, $sig] = $this->signed($doc, $k1['secret']);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('hub_keys.json');
+        set_error_handler(static fn(): bool => true);
+        try {
+            $store->accept($json, $sig);
+        } finally {
+            restore_error_handler();
+            $this->assertFileDoesNotExist($this->paths->catalogueJson());
+            $this->assertFileDoesNotExist($this->paths->state() . '/catalogue_seq');
+            $this->assertNull($store->heldSeq());
+        }
     }
 
     public function test_is_removed_matches_hash_or_filename_ignoring_case(): void
