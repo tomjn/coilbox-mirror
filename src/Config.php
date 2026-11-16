@@ -36,7 +36,7 @@ final class Config
     public static function fromArray(array $a): self
     {
         $mirrorId = $a['mirror_id'] ?? null;
-        if (!is_string($mirrorId) || preg_match('/^[a-z0-9][a-z0-9-]{0,63}$/', $mirrorId) !== 1) {
+        if (!is_string($mirrorId) || preg_match('/^[a-z0-9][a-z0-9-]{0,63}\z/', $mirrorId) !== 1) {
             throw new ConfigError('mirror_id must be 1 to 64 characters: lowercase letters, digits and hyphens, not starting with a hyphen.');
         }
 
@@ -80,11 +80,14 @@ final class Config
 
     private static function validHubUrl(string $url): bool
     {
-        if (preg_match('#^https://[^\s/?\#]+#', $url) === 1) {
-            $parts = parse_url($url);
-            return $parts !== false && ($parts['host'] ?? '') !== '' && !isset($parts['query']) && !isset($parts['fragment']);
+        // No whitespace anywhere, and no query or fragment.
+        if (preg_match('/\s/', $url) === 1 || str_contains($url, '?') || str_contains($url, '#')) {
+            return false;
         }
-        return preg_match('#^http://(127\.0\.0\.1|localhost)(:\d{1,5})?(/.*)?$#', $url) === 1
-            && !str_contains($url, '?') && !str_contains($url, '#');
+        if (preg_match('#^https://[^/]+#', $url) === 1) {
+            $parts = parse_url($url);
+            return $parts !== false && ($parts['host'] ?? '') !== '';
+        }
+        return preg_match('#^http://(127\.0\.0\.1|localhost)(:\d{1,5})?(/.*)?\z#', $url) === 1;
     }
 }
