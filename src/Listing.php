@@ -106,11 +106,14 @@ final class Listing
         }
     }
 
-    /** Hashes one file and updates listing.json. The caller holds the disk lock. */
-    public static function addFile(Paths $p, string $kind, string $filename, int $now): void
+    /**
+     * Adds one file to listing.json, hashing it unless the caller passes the hash it already has.
+     * The caller holds the disk lock.
+     */
+    public static function addFile(Paths $p, string $kind, string $filename, int $now, ?string $sha256 = null): void
     {
         $doc = self::load($p) ?? self::document([], $now);
-        $entry = self::entry($p, $kind, $filename, null);
+        $entry = self::entry($p, $kind, $filename, null, $sha256);
         $files = array_values(array_filter(
             $doc['files'],
             static fn (array $f) => !($f['kind'] === $kind && $f['filename'] === $filename),
@@ -129,7 +132,7 @@ final class Listing
         return null;
     }
 
-    private static function entry(Paths $p, string $kind, string $name, ?array $previous): array
+    private static function entry(Paths $p, string $kind, string $name, ?array $previous, ?string $sha256 = null): array
     {
         $path = $p->dirFor($kind) . '/' . $name;
         clearstatcache(true, $path);
@@ -138,9 +141,9 @@ final class Listing
         if ($size === false || $mtime === false) {
             throw new \RuntimeException("Cannot stat $path");
         }
-        if ($previous !== null && ($previous['size'] ?? null) === $size && ($previous['mtime'] ?? null) === $mtime && is_string($previous['sha256'] ?? null)) {
+        if ($sha256 === null && $previous !== null && ($previous['size'] ?? null) === $size && ($previous['mtime'] ?? null) === $mtime && is_string($previous['sha256'] ?? null)) {
             $sha256 = $previous['sha256'];
-        } else {
+        } elseif ($sha256 === null) {
             $sha256 = hash_file('sha256', $path);
             if ($sha256 === false) {
                 throw new \RuntimeException("Cannot hash $path");

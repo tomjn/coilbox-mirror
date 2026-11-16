@@ -104,6 +104,12 @@ final class UploadHandler
             }
             $have = fstat($out)['size'];
 
+            // A full partial means an earlier finish died after the last byte, for example when PHP was killed
+            // while hashing. The bytes are all here, so finish now instead of refusing every resend.
+            if ($have === $token->size) {
+                return $this->finish($token, $path);
+            }
+
             // A partial with no bytes is a first chunk, so the start-by and removal checks apply.
             if ($have === 0) {
                 $token->checkStartBy(($this->now)());
@@ -152,38 +158,46 @@ final class UploadHandler
      * Checks the finished partial and moves it into the public folder. The caller holds the partial lock.
      * Returns whether the listing entry was written. A false means the file is in place but unlisted.
      *
-     * @throws ProtocolError hash_mismatch, exists or write_failed, after deleting the partial
+     * Any failure deletes the partial first, so a failed finish never leaves a full partial that refuses every resend.
+     *
+     * @throws ProtocolError hash_mismatch, exists or write_failed
      */
     private function finish(Token $token, string $partialPath): bool
     {
+        try {
+            return $this->checkAndPlace($token, $partialPath);
+        } catch (\Throwable $e) {
+            @unlink($partialPath);
+            throw $e;
+        }
+    }
+
+    /** The body of finish(). Every throw here reaches finish(), which deletes the partial. */
+    private function checkAndPlace(Token $token, string $partialPath): bool
+    {
         $hash = hash_file('sha256', $partialPath);
         if ($hash === false || !hash_equals($token->sha256, $hash)) {
-            @unlink($partialPath);
             throw new ProtocolError('hash_mismatch');
         }
 
         $disk = Lock::acquire($this->paths->state() . '/disk.lock', true);
         if ($disk === null) {
-            @unlink($partialPath);
             throw new ProtocolError('write_failed');
         }
         try {
             $dir = $this->paths->dirFor($token->kind);
             $names = @scandir($dir);
             if ($names === false) {
-                @unlink($partialPath);
                 throw new ProtocolError('write_failed');
             }
             $wanted = mb_strtolower($token->filename);
             foreach ($names as $name) {
                 if (mb_strtolower($name) === $wanted) {
-                    @unlink($partialPath);
                     throw new ProtocolError('exists');
                 }
             }
 
             if (!@rename($partialPath, "$dir/$token->filename")) {
-                @unlink($partialPath);
                 throw new ProtocolError('write_failed');
             }
             // The file is in place now, so later failures do not fail the upload. A replay of this upload id
@@ -192,7 +206,7 @@ final class UploadHandler
                 error_log("mirror: cannot write used marker for upload $token->uploadId");
             }
             try {
-                Listing::addFile($this->paths, $token->kind, $token->filename, ($this->now)());
+                Listing::addFile($this->paths, $token->kind, $token->filename, ($this->now)(), $hash);
                 return true;
             } catch (\Throwable $e) {
                 error_log("mirror: cannot list $token->filename after upload $token->uploadId: " . $e->getMessage());
@@ -205,12 +219,14 @@ final class UploadHandler
 
     private function report(Token $token): bool
     {
-        $now = ($this->now)();
-        $listing = Listing::load($this->paths) ?? ['v' => 1, 'generated_at' => $now, 'files' => []];
-        $payload = Report::payload($this->config, $this->store->held(), $listing, 'upload', $token->uploadId, $now);
+        // The file is in place by now, so nothing here may turn the 201 into an error.
         try {
+            $now = ($this->now)();
+            $listing = Listing::load($this->paths) ?? ['v' => 1, 'generated_at' => $now, 'files' => []];
+            $payload = Report::payload($this->config, $this->store->held(), $listing, 'upload', $token->uploadId, $now);
             return Report::send($this->http, $this->config, Report::body($payload, $this->config->secretKey));
-        } catch (\Exception) {
+        } catch (\Throwable $e) {
+            error_log("mirror: upload report for $token->uploadId failed: " . $e->getMessage());
             return false;
         }
     }

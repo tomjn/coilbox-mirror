@@ -134,6 +134,20 @@ final class ListingTest extends TestCase
         }
     }
 
+    public function test_add_file_uses_a_hash_the_caller_already_has(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->maps() . '/a.sd7', 'aaa');
+            // A hash that does not match the bytes proves the file was not hashed again.
+            Listing::addFile($paths, 'map', 'a.sd7', 1795000300, str_repeat('b', 64));
+
+            $this->assertSame(str_repeat('b', 64), Listing::find(Listing::load($paths), 'map', 'a.sd7')['sha256']);
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
     public function test_add_file_works_without_an_existing_listing(): void
     {
         $paths = TempMirror::create();

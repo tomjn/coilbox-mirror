@@ -137,11 +137,12 @@ The mirror handles a `POST` in this order.
 2. If the upload id is already used, answer `used`.
 3. Read the `chunk` part. A missing part, a failed PHP upload or an unreadable file is `bad_request`. An empty chunk is `bad_request`.
 4. Take a lock on the partial file, so two requests for one upload cannot interleave. Check again whether the upload became used while waiting.
-5. If the partial file holds no bytes, this is a first chunk. Answer `expired` if the current time is later than `start_by`. Answer `removed` if the catalogue the mirror holds lists this file's hash, or its filename in any letter case, as removed.
-6. Read `X-Mirror-Offset`. A missing or malformed value is `bad_request`. If it does not equal the number of bytes the mirror holds, answer `bad_offset`.
-7. If the bytes held plus the chunk would pass `size`, answer `too_large`.
-8. Append the chunk. If the write comes up short, cut the partial back to its old length and answer `write_failed`.
-9. If the bytes held now equal `size`, finish the upload (below). Otherwise answer `200`.
+5. If the partial file already holds `size` bytes, an earlier finish was cut short, for example because PHP was stopped while hashing. Ignore the chunk and the offset, and finish the upload (below).
+6. If the partial file holds no bytes, this is a first chunk. Answer `expired` if the current time is later than `start_by`. Answer `removed` if the catalogue the mirror holds lists this file's hash, or its filename in any letter case, as removed.
+7. Read `X-Mirror-Offset`. A missing or malformed value is `bad_request`. If it does not equal the number of bytes the mirror holds, answer `bad_offset`.
+8. If the bytes held plus the chunk would pass `size`, answer `too_large`.
+9. Append the chunk. If the write comes up short, cut the partial back to its old length and answer `write_failed`.
+10. If the bytes held now equal `size`, finish the upload (below). Otherwise answer `200`.
 
 Only a first chunk is checked against `start_by` and the removal list. Once bytes are held, later chunks carry on even after `start_by` has passed.
 
@@ -173,7 +174,9 @@ When the last chunk arrives, the mirror takes the disk lock and does this.
 4. Record the upload id as used.
 5. Add the file to `listing.json` (section 5) and send an `upload` report to the hub (section 7). A failure in this step does not fail the upload.
 
-If the mirror cannot take the disk lock, read the target folder or move the file, it deletes the partial and answers `write_failed`.
+If the mirror cannot take the disk lock, read the target folder or move the file, it deletes the partial and answers `write_failed`. Any other failure before the file is in place also deletes the partial, and the answer is `internal_error`. After either, the uploader starts again from offset 0.
+
+A `GET` that answers `received` equal to `size` with `complete` set to `false` means a finish was cut short. The uploader sends any non-empty chunk, and the mirror finishes the upload from the bytes it holds (step 5 above).
 
 ### Errors
 

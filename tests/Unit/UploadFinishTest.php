@@ -291,6 +291,68 @@ final class UploadFinishTest extends TestCase
         $this->assertFalse($r->body['reported']);
     }
 
+    public function test_report_that_throws_an_error_still_returns_201(): void
+    {
+        $http = new class implements HttpClient {
+            public function get(string $url, ?int $maxBytes = null): HttpResponse
+            {
+                throw new \Error('broken client');
+            }
+
+            public function postJson(string $url, string $body): HttpResponse
+            {
+                throw new \Error('broken client');
+            }
+
+            public function download(string $url, string $dest, int $expectedSize, Deadline $deadline): DownloadResult
+            {
+                throw new \Error('broken client');
+            }
+        };
+        $this->post('abcd', '0');
+        $tmp = tempnam(sys_get_temp_dir(), 'chunk');
+        file_put_contents($tmp, 'efghij');
+        $file = ['name' => 'blob', 'tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK, 'size' => 6];
+        $r = $this->handlerWith($http)->handle(new Request('POST', ['x-mirror-token' => $this->token(), 'x-mirror-offset' => '4'], $file));
+        @unlink($tmp);
+        $this->assertSame(201, $r->status);
+        $this->assertFalse($r->body['reported']);
+    }
+
+    public function test_resend_to_a_full_size_partial_finishes_the_upload(): void
+    {
+        // A finish that died after the last byte, for example when PHP was killed while hashing, leaves this behind.
+        file_put_contents($this->paths->partial() . '/upload-up-1', $this->body);
+        $status = $this->handler()->handle(new Request('GET', ['x-mirror-token' => $this->token()], null));
+        $this->assertSame(['received' => 10, 'complete' => false], $status->body);
+
+        $r = $this->post('efghij', '4');
+
+        $this->assertSame(201, $r->status);
+        $this->assertTrue($r->body['complete']);
+        $this->assertSame($this->body, file_get_contents($this->paths->maps() . '/test.sd7'));
+        $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
+        $this->assertFileExists($this->paths->state() . '/used/up-1');
+    }
+
+    public function test_throwable_inside_finish_deletes_the_partial(): void
+    {
+        $this->assertSame(200, $this->post('abcd', '0')->status);
+        // A folder where disk.lock should be makes Lock::acquire throw.
+        mkdir($this->paths->state() . '/disk.lock');
+        set_error_handler(static fn(): bool => true);
+        try {
+            $this->post('efghij', '4');
+            $this->fail('Expected the finish to throw');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('disk.lock', $e->getMessage());
+        } finally {
+            restore_error_handler();
+        }
+        $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
+        $this->assertFileDoesNotExist($this->paths->maps() . '/test.sd7');
+    }
+
     public function test_failed_listing_write_keeps_the_201_and_skips_the_report(): void
     {
         // A folder where listing.json should be makes the listing write fail.
