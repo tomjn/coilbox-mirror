@@ -255,13 +255,6 @@ final class UploadReceiveTest extends TestCase
         $this->assertSame(['error' => 'bad_offset', 'received' => 0], $r->body);
     }
 
-    public function test_reaching_size_returns_the_normal_response_for_now(): void
-    {
-        $r = $this->post($this->body, '0');
-        $this->assertSame(200, $r->status);
-        $this->assertSame(['received' => 10, 'complete' => false], $r->body);
-    }
-
     public function test_wrong_mirror_and_bad_token_return_403(): void
     {
         $other = $this->post('abcd', '0', $this->token(['mirror' => 'm2']));

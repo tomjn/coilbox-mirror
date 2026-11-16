@@ -16,6 +16,8 @@ final class UploadHandler
         'used' => 409,
         'bad_offset' => 409,
         'too_large' => 413,
+        'hash_mismatch' => 422,
+        'exists' => 409,
         'write_failed' => 500,
         'method_not_allowed' => 405,
     ];
@@ -67,21 +69,36 @@ final class UploadHandler
             if ($chunkSize < 1) {
                 throw new ProtocolError('bad_request');
             }
-            return $this->append($token, $r, $chunk, $chunkSize);
+            $early = $this->append($token, $r, $chunk, $chunkSize);
         } finally {
             fclose($chunk);
         }
+        if ($early !== null) {
+            return $early;
+        }
+        // The partial lock and the disk lock are both released, so a slow hub holds neither.
+        return new Response(201, [
+            'complete' => true,
+            'received' => $token->size,
+            'path' => ($token->kind === 'map' ? 'maps/' : 'games/') . $token->filename,
+            'reported' => $this->report($token),
+        ]);
     }
 
     /**
      * @param resource $chunk
+     * @return Response|null the response for a chunk that is not the last, or null once the file is in place
      * @throws ProtocolError
      */
-    private function append(Token $token, Request $r, $chunk, int $chunkSize): Response
+    private function append(Token $token, Request $r, $chunk, int $chunkSize): ?Response
     {
         $path = $this->partialFile($token);
         $out = $this->lockPartial($path);
         try {
+            // A request that waited on the lock may have found the upload finished by the previous holder.
+            if (is_file($this->usedFile($token))) {
+                throw new ProtocolError('used');
+            }
             $have = fstat($out)['size'];
 
             // A partial with no bytes is a first chunk, so the start-by and removal checks apply.
@@ -107,7 +124,7 @@ final class UploadHandler
             if (fseek($out, $have) !== 0) {
                 throw new ProtocolError('write_failed');
             }
-            $written = stream_copy_to_stream($chunk, $out);
+            $written = stream_copy_to_stream($chunk, $out, $chunkSize);
             if ($written !== $chunkSize || !fflush($out)) {
                 ftruncate($out, $have);
                 throw new ProtocolError('write_failed');
@@ -115,7 +132,8 @@ final class UploadHandler
 
             $received = $have + $chunkSize;
             if ($received === $token->size) {
-                return $this->finish($token, $path, $received);
+                $this->finish($token, $path);
+                return null;
             }
             return new Response(200, ['received' => $received, 'complete' => false]);
         } finally {
@@ -128,10 +146,55 @@ final class UploadHandler
         }
     }
 
-    /** Task 9 adds the steps that check and place the finished file. */
-    private function finish(Token $token, string $partialPath, int $received): Response
+    /**
+     * Checks the finished partial and moves it into the public folder. The caller holds the partial lock.
+     *
+     * @throws ProtocolError hash_mismatch or exists, after deleting the partial
+     */
+    private function finish(Token $token, string $partialPath): void
     {
-        return new Response(200, ['received' => $received, 'complete' => false]);
+        $hash = hash_file('sha256', $partialPath);
+        if ($hash === false || !hash_equals($token->sha256, $hash)) {
+            @unlink($partialPath);
+            throw new ProtocolError('hash_mismatch');
+        }
+
+        $disk = Lock::acquire($this->paths->state() . '/disk.lock', true);
+        try {
+            $dir = $this->paths->dirFor($token->kind);
+            $wanted = mb_strtolower($token->filename);
+            foreach (scandir($dir) ?: [] as $name) {
+                if (mb_strtolower($name) === $wanted) {
+                    @unlink($partialPath);
+                    throw new ProtocolError('exists');
+                }
+            }
+
+            if (!rename($partialPath, "$dir/$token->filename")) {
+                throw new ProtocolError('write_failed');
+            }
+            // The file is in place now. A failure below leaves a file the next sync lists and reports,
+            // and a replay of this upload id is refused anyway because the name exists.
+            @touch($this->usedFile($token));
+            try {
+                Listing::addFile($this->paths, $token->kind, $token->filename, ($this->now)());
+            } catch (\RuntimeException) {
+            }
+        } finally {
+            $disk->release();
+        }
+    }
+
+    private function report(Token $token): bool
+    {
+        $now = ($this->now)();
+        $listing = Listing::load($this->paths) ?? ['v' => 1, 'generated_at' => $now, 'files' => []];
+        $payload = Report::payload($this->config, $this->store->held(), $listing, 'upload', $token->uploadId, $now);
+        try {
+            return Report::send($this->http, $this->config, Report::body($payload, $this->config->secretKey));
+        } catch (\Exception) {
+            return false;
+        }
     }
 
     /**
