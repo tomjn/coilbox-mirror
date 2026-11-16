@@ -39,10 +39,32 @@ final class Listing
             return null;
         }
         $doc = Json::decodeObject($raw);
-        if ($doc === null || ($doc['v'] ?? null) !== 1 || !is_int($doc['generated_at'] ?? null) || !is_array($doc['files'] ?? null)) {
-            return null;
+        return $doc !== null && self::isValidDoc($doc) ? $doc : null;
+    }
+
+    /** True when the document has the listing shape, with every entry well formed. */
+    public static function isValidDoc(array $doc): bool
+    {
+        if (($doc['v'] ?? null) !== 1 || !is_int($doc['generated_at'] ?? null)) {
+            return false;
         }
-        return $doc;
+        $files = $doc['files'] ?? null;
+        if (!is_array($files) || !array_is_list($files)) {
+            return false;
+        }
+        foreach ($files as $file) {
+            if (
+                !is_array($file)
+                || !is_string($file['filename'] ?? null) || !Filename::isValid($file['filename'])
+                || !in_array($file['kind'] ?? null, self::KINDS, true)
+                || !is_int($file['size'] ?? null) || $file['size'] < 1
+                || !is_string($file['sha256'] ?? null) || preg_match('/^[0-9a-f]{64}\z/', $file['sha256']) !== 1
+                || !is_int($file['mtime'] ?? null)
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Writes to a uniquely named temp file in the same folder, then renames it into place. */

@@ -6,6 +6,7 @@ namespace Mirror\Tests\Unit;
 
 use Mirror\Listing;
 use Mirror\Tests\Support\TempMirror;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ListingTest extends TestCase
@@ -127,6 +128,61 @@ final class ListingTest extends TestCase
             $doc = Listing::load($paths);
             $this->assertSame(1, $doc['v']);
             $this->assertSame(['g.sdz'], array_column($doc['files'], 'filename'));
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private static function entry(array $override = []): array
+    {
+        return $override + ['filename' => 'a.sd7', 'kind' => 'map', 'size' => 3, 'sha256' => str_repeat('a', 64), 'mtime' => 1795000000];
+    }
+
+    private static function docWith(array $files): array
+    {
+        return ['v' => 1, 'generated_at' => 1795000000, 'files' => $files];
+    }
+
+    public function test_is_valid_doc_accepts_a_well_formed_listing(): void
+    {
+        $this->assertTrue(Listing::isValidDoc(self::docWith([])));
+        $this->assertTrue(Listing::isValidDoc(self::docWith([self::entry(), self::entry(['kind' => 'game', 'filename' => 'g.SDZ'])])));
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function badDocs(): array
+    {
+        return [
+            'wrong version' => [['v' => 2, 'generated_at' => 1, 'files' => []]],
+            'string generated_at' => [['v' => 1, 'generated_at' => '1', 'files' => []]],
+            'files not a list' => [['v' => 1, 'generated_at' => 1, 'files' => ['x' => self::entry()]]],
+            'files missing' => [['v' => 1, 'generated_at' => 1]],
+            'entry not an array' => [self::docWith(['a.sd7'])],
+            'bad filename' => [self::docWith([self::entry(['filename' => '../a.sd7'])])],
+            'bad kind' => [self::docWith([self::entry(['kind' => 'mod'])])],
+            'zero size' => [self::docWith([self::entry(['size' => 0])])],
+            'string size' => [self::docWith([self::entry(['size' => '3'])])],
+            'short hash' => [self::docWith([self::entry(['sha256' => 'abc'])])],
+            'upper case hash' => [self::docWith([self::entry(['sha256' => str_repeat('A', 64)])])],
+            'hash with trailing newline' => [self::docWith([self::entry(['sha256' => str_repeat('a', 64) . "\n"])])],
+            'float mtime' => [self::docWith([self::entry(['mtime' => 1.5])])],
+            'missing mtime' => [self::docWith([['filename' => 'a.sd7', 'kind' => 'map', 'size' => 3, 'sha256' => str_repeat('a', 64)]])],
+        ];
+    }
+
+    #[DataProvider('badDocs')]
+    public function test_is_valid_doc_rejects_malformed_listings(array $doc): void
+    {
+        $this->assertFalse(Listing::isValidDoc($doc));
+    }
+
+    public function test_load_returns_null_when_an_entry_is_malformed(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->listing(), json_encode(self::docWith([self::entry(['size' => 0])])));
+            $this->assertNull(Listing::load($paths));
         } finally {
             TempMirror::destroy($paths);
         }

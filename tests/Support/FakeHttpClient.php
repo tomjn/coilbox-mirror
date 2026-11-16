@@ -21,6 +21,18 @@ final class FakeHttpClient implements HttpClient
     /** @var list<string> */
     public array $downloads = [];
 
+    /** @var list<string> */
+    public array $downloadDests = [];
+
+    /** @var array<string, array{DownloadResult, string|null}> */
+    private array $downloadOutcomes = [];
+
+    /** Makes download($url) return $outcome, first writing $bytes to the destination when given. */
+    public function onDownload(string $url, DownloadResult $outcome, ?string $bytes = null): void
+    {
+        $this->downloadOutcomes[$url] = [$outcome, $bytes];
+    }
+
     public function on(string $url, HttpResponse $r): void
     {
         $this->responses[$url] = $r;
@@ -40,6 +52,14 @@ final class FakeHttpClient implements HttpClient
     public function download(string $url, string $dest, int $expectedSize, Deadline $deadline): DownloadResult
     {
         $this->downloads[] = $url;
+        $this->downloadDests[] = $dest;
+        if (isset($this->downloadOutcomes[$url])) {
+            [$outcome, $bytes] = $this->downloadOutcomes[$url];
+            if ($bytes !== null) {
+                file_put_contents($dest, $bytes);
+            }
+            return $outcome;
+        }
         $r = $this->responses[$url] ?? null;
         if ($r === null || $r->status !== 200) {
             return DownloadResult::Failed;

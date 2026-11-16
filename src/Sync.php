@@ -116,9 +116,138 @@ final class Sync
         return $deleted;
     }
 
+    /** Downloads each archive the mirror lacks from a peer that lists it, and keeps only bytes that match the catalogue hash. */
     public function fetchMissing(): void
     {
-        // Task 11 fills this in.
+        $held = $this->store->held();
+        if ($held === null) {
+            return;
+        }
+        $own = Listing::load($this->paths) ?? Listing::build($this->paths, null, ($this->now)());
+
+        $missing = [];
+        foreach ($held['archives'] as $archive) {
+            if (!$this->isOnDisk($own, $archive) && !$this->store->isRemoved($archive['sha256'], $archive['filename'])) {
+                $missing[] = $archive;
+            }
+        }
+        if ($missing === []) {
+            return;
+        }
+
+        $peers = $this->peerListings($held['mirrors']);
+        foreach ($missing as $archive) {
+            if ($this->deadline->expired()) {
+                $this->log('fetch stopped: out of time');
+                return;
+            }
+            if (!$this->fetchOne($archive, $peers)) {
+                return;
+            }
+        }
+    }
+
+    /** @return array<string, array> each usable peer's listing, keyed by base URL */
+    private function peerListings(array $mirrors): array
+    {
+        $listings = [];
+        foreach ($mirrors as $peer) {
+            if ($peer['id'] === $this->config->mirrorId) {
+                continue;
+            }
+            $response = $this->http->get($peer['base_url'] . '/listing.json');
+            $doc = $response->status === 200 ? Json::decodeObject($response->body) : null;
+            if ($doc === null || !Listing::isValidDoc($doc)) {
+                $this->log('listing from peer:' . $peer['id'] . ' skipped');
+                continue;
+            }
+            $listings[$peer['base_url']] = $doc;
+        }
+        return $listings;
+    }
+
+    private function isOnDisk(array $listing, array $archive): bool
+    {
+        $name = mb_strtolower($archive['filename']);
+        foreach ($listing['files'] as $file) {
+            if ($file['kind'] === $archive['kind'] && $file['sha256'] === $archive['sha256'] && mb_strtolower($file['filename']) === $name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return bool false when the whole fetch should stop */
+    private function fetchOne(array $archive, array $peers): bool
+    {
+        $folder = $archive['kind'] === 'map' ? 'maps' : 'games';
+        $partial = $this->paths->partial() . '/sync-' . $archive['sha256'];
+
+        foreach ($peers as $baseUrl => $listing) {
+            $entry = Listing::find($listing, $archive['kind'], $archive['filename']);
+            if ($entry === null || $entry['sha256'] !== $archive['sha256'] || $entry['size'] !== $archive['size']) {
+                continue;
+            }
+
+            $url = "$baseUrl/$folder/" . rawurlencode($archive['filename']);
+            $result = $this->http->download($url, $partial, $archive['size'], $this->deadline);
+            if ($result === DownloadResult::Stopped) {
+                $this->log("download of $folder/{$archive['filename']} stopped: out of time");
+                return false;
+            }
+            if ($result === DownloadResult::Failed) {
+                @unlink($partial);
+                $this->log("download of $folder/{$archive['filename']} from $baseUrl failed");
+                continue;
+            }
+
+            $actual = $this->deadline->step(static fn (): string|false => @hash_file('sha256', $partial));
+            if (!is_string($actual) || !hash_equals($archive['sha256'], $actual)) {
+                @unlink($partial);
+                $this->log("hash mismatch for $folder/{$archive['filename']} from $baseUrl");
+                continue;
+            }
+
+            $this->place($archive, $folder, $partial);
+            return true;
+        }
+        return true;
+    }
+
+    /** Moves a verified partial into the kind folder unless the name is already taken. */
+    private function place(array $archive, string $folder, string $partial): void
+    {
+        $this->withDiskLock(function () use ($archive, $folder, $partial): void {
+            $dir = $this->paths->dirFor($archive['kind']);
+            $names = is_dir($dir) ? scandir($dir) : false;
+            if ($names === false) {
+                $this->log("cannot read $folder, kept the download in .partial");
+                return;
+            }
+
+            $lower = mb_strtolower($archive['filename']);
+            foreach ($names as $name) {
+                if (mb_strtolower($name) !== $lower) {
+                    continue;
+                }
+                $existing = @hash_file('sha256', "$dir/$name");
+                @unlink($partial);
+                if (is_string($existing) && hash_equals($archive['sha256'], $existing)) {
+                    $this->log("$folder/$name is already present");
+                } else {
+                    $this->log("conflict: $folder/$name exists with different bytes, left alone");
+                }
+                return;
+            }
+
+            if (!rename($partial, "$dir/{$archive['filename']}")) {
+                @unlink($partial);
+                $this->log("could not move $folder/{$archive['filename']} into place");
+                return;
+            }
+            Listing::addFile($this->paths, $archive['kind'], $archive['filename'], ($this->now)());
+            $this->log("fetched $folder/{$archive['filename']}");
+        });
     }
 
     /** @return list<string> deleted file names */
