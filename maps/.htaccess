@@ -9,4 +9,6 @@ DirectoryIndex disabled
 # This overrides the root deny, so a valid archive name like x.php.sd7 still downloads.
 <FilesMatch "\.(?i:sd7|sdz)$">
   Require all granted
+  # RemoveHandler does not undo a server-level SetHandler, so switch the handler off here too.
+  SetHandler None
 </FilesMatch>

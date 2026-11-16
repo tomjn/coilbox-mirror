@@ -10,6 +10,33 @@ use Closure;
 final class Sync
 {
     /**
+     * Log lines that report normal work. The log has no severity, so sync.php prints every other line as a
+     * failure when it runs quietly. Keep these in step with the messages below. SyncRoutineTest checks them.
+     */
+    public const ROUTINE_EXACT = ['another sync is running'];
+    public const ROUTINE_PREFIXES = ['catalogue accepted from ', 'fetched ', 'removed '];
+    public const ROUTINE_SUFFIXES = [' is already present', ' rejected: not_newer'];
+
+    /** True when the line reports normal work, such as an unchanged catalogue, and not a failure. */
+    public static function isRoutine(string $line): bool
+    {
+        if (in_array($line, self::ROUTINE_EXACT, true)) {
+            return true;
+        }
+        foreach (self::ROUTINE_PREFIXES as $prefix) {
+            if (str_starts_with($line, $prefix)) {
+                return true;
+            }
+        }
+        foreach (self::ROUTINE_SUFFIXES as $suffix) {
+            if (str_ends_with($line, $suffix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * @param Closure(): int $now returns the current Unix time
      * @param Closure(string): void $log receives one line per event
      */

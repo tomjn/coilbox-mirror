@@ -6,7 +6,7 @@
 # The pattern matches the extension anywhere in the name, because Apache applies
 # the handler of every extension in a chain, so "notes.php.txt" can reach PHP.
 # ---------------------------------------------------------------
-<FilesMatch "\.(php[0-9]?|phtml|phps|phar|inc|cgi|pl|py|sh|bash|shtml|jsp|asp|aspx)(\.|$)">
+<FilesMatch "(?i)\.(php[0-9]?|phtml|phps|phar|inc|cgi|pl|py|sh|bash|shtml|jsp|asp|aspx)(\.|$)">
   Require all denied
 </FilesMatch>
 
@@ -21,9 +21,12 @@
 RedirectMatch 404 /\.(git|partial)(/|$)
 
 # The two public entry points. This comes after the denies because a later
-# section overrides an earlier one.
+# section overrides an earlier one. A FilesMatch on the name alone would also
+# apply in every subfolder, so the grant checks the full path. It assumes the
+# mirror sits at the domain root. A subfolder install must put its prefix
+# in the expression, for example m#^/mirror/(upload|limits)\.php$#.
 <FilesMatch "^(upload|limits)\.php$">
-  Require all granted
+  Require expr "%{REQUEST_URI} =~ m#^/(upload|limits)\.php$#"
 </FilesMatch>
 
 # ---------------------------------------------------------------

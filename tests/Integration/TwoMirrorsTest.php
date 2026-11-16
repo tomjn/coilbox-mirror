@@ -404,6 +404,35 @@ final class TwoMirrorsTest extends TestCase
         $this->assertStringContainsString('sync report failed', $output);
     }
 
+    public function test_sync_php_stays_silent_when_nothing_changed(): void
+    {
+        $this->startBothMirrors();
+        $bytes = random_bytes(1000);
+        $this->putMap('a', $bytes);
+        $this->publishToHub(1, [$this->archive($bytes)]);
+
+        $this->assertSame([0, ''], $this->runSyncPhp('b'));
+        $this->assertSame([0, ''], $this->runSyncPhp('b'));
+    }
+
+    public function test_oversize_peer_listing_is_skipped_and_nothing_is_downloaded_from_it(): void
+    {
+        $this->startBothMirrors();
+        $bytes = random_bytes(1000);
+        $this->putMap('a', $bytes);
+        $this->publishToHub(1, [$this->archive($bytes)]);
+        // A valid listing padded with spaces until it is over the size the sync allows for one archive.
+        $cap = Listing::maxDocBytes(3);
+        $listing = (string) file_get_contents("{$this->base}/a/listing.json");
+        file_put_contents("{$this->base}/a/listing.json", $listing . str_repeat(' ', $cap + 1 - strlen($listing)));
+
+        $this->sync('b');
+
+        $this->assertContains("listing from peer:a skipped, missing, malformed or over $cap bytes", $this->log);
+        $this->assertFileDoesNotExist($this->paths('b')->maps() . '/' . self::MAP);
+        $this->assertStringNotContainsString('/maps/', (string) file_get_contents("{$this->base}/a-server.log"));
+    }
+
     /** @return array{0: int, 1: string} exit code and combined output */
     private function runSyncPhp(string $id, string ...$args): array
     {

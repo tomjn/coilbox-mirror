@@ -23,18 +23,12 @@ use Mirror\Sync;
 $verbose = in_array('--verbose', $argv, true);
 
 // Cron emails anything a job prints, so a quiet run must print nothing. Sync reports every event through one
-// callback with no severity, so this file names the lines that mean "all is well" and treats every other line
-// as a failure. A new kind of log line is therefore shown until it is added here.
-$routine = static fn (string $line): bool => $line === 'another sync is running'
-    || str_starts_with($line, 'catalogue accepted from ')
-    || str_starts_with($line, 'fetched ')
-    || str_starts_with($line, 'removed ')
-    || str_ends_with($line, ' is already present');
-
-$log = static function (string $line) use ($verbose, $routine): void {
+// callback with no severity, so Sync::isRoutine() names the lines that mean "all is well" and every other line
+// counts as a failure.
+$log = static function (string $line) use ($verbose): void {
     if ($verbose) {
         fwrite(STDOUT, $line . "\n");
-    } elseif (!$routine($line)) {
+    } elseif (!Sync::isRoutine($line)) {
         fwrite(STDERR, $line . "\n");
     }
 };
