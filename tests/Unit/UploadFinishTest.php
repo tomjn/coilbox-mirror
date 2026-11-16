@@ -8,6 +8,9 @@ use Mirror\B64;
 use Mirror\CatalogueStore;
 use Mirror\Config;
 use Mirror\Crypto;
+use Mirror\Deadline;
+use Mirror\DownloadResult;
+use Mirror\HttpClient;
 use Mirror\HttpResponse;
 use Mirror\Json;
 use Mirror\Listing;
@@ -66,9 +69,13 @@ final class UploadFinishTest extends TestCase
     private array $mirror;
     private FakeHttpClient $http;
     private string $body = 'abcdefghij';
+    private string $errorLog = '';
+    private string|false $oldErrorLog = false;
 
     protected function setUp(): void
     {
+        $this->errorLog = tempnam(sys_get_temp_dir(), 'errlog');
+        $this->oldErrorLog = ini_set('error_log', $this->errorLog);
         $this->paths = TempMirror::create();
         $this->hub = Signer::keypair(1);
         $this->mirror = Signer::keypair(8);
@@ -78,6 +85,11 @@ final class UploadFinishTest extends TestCase
 
     protected function tearDown(): void
     {
+        ini_set('error_log', $this->oldErrorLog === false ? '' : $this->oldErrorLog);
+        @unlink($this->errorLog);
+        foreach ([$this->paths->maps(), $this->paths->state() . '/used'] as $dir) {
+            @chmod($dir, 0755);
+        }
         TempMirror::destroy($this->paths);
     }
 
@@ -111,6 +123,18 @@ final class UploadFinishTest extends TestCase
             'kind' => 'map',
             'start_by' => self::NOW + 100,
         ], $this->hub['secret']);
+    }
+
+    private function handlerWith(HttpClient $http): UploadHandler
+    {
+        $config = Config::fromArray([
+            'mirror_id' => 'm1',
+            'secret_key' => B64::encode($this->mirror['secret']),
+            'hub_url' => 'https://hub.example',
+            'hub_keys' => [B64::encode($this->hub['public'])],
+            'partial_lifetime' => 3600,
+        ]);
+        return new UploadHandler($this->paths, $config, new CatalogueStore($this->paths, $config), $http, fn(): int => self::NOW);
     }
 
     private function post(string $bytes, string $offset, ?array $file = null, ?string $token = null): Response
@@ -237,5 +261,93 @@ final class UploadFinishTest extends TestCase
         $this->assertSame(201, $r->status);
         $this->assertFalse($r->body['reported']);
         $this->assertFileExists($this->paths->maps() . '/test.sd7');
+    }
+
+    public function test_report_that_throws_gives_reported_false(): void
+    {
+        $http = new class implements HttpClient {
+            public function get(string $url): HttpResponse
+            {
+                throw new \RuntimeException('hub unreachable');
+            }
+
+            public function postJson(string $url, string $body): HttpResponse
+            {
+                throw new \RuntimeException('hub unreachable');
+            }
+
+            public function download(string $url, string $dest, int $expectedSize, Deadline $deadline): DownloadResult
+            {
+                throw new \RuntimeException('hub unreachable');
+            }
+        };
+        $this->post('abcd', '0');
+        $tmp = tempnam(sys_get_temp_dir(), 'chunk');
+        file_put_contents($tmp, 'efghij');
+        $file = ['name' => 'blob', 'tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK, 'size' => 6];
+        $r = $this->handlerWith($http)->handle(new Request('POST', ['x-mirror-token' => $this->token(), 'x-mirror-offset' => '4'], $file));
+        @unlink($tmp);
+        $this->assertSame(201, $r->status);
+        $this->assertFalse($r->body['reported']);
+    }
+
+    public function test_failed_listing_write_keeps_the_201_and_skips_the_report(): void
+    {
+        // A folder where listing.json should be makes the listing write fail.
+        mkdir($this->paths->listing());
+        set_error_handler(static fn(): bool => true);
+        try {
+            $r = $this->upload();
+        } finally {
+            restore_error_handler();
+        }
+        $this->assertSame(201, $r->status);
+        $this->assertFalse($r->body['reported']);
+        $this->assertSame([], $this->http->posts);
+        $this->assertFileExists($this->paths->maps() . '/test.sd7');
+        $this->assertStringContainsString('cannot list test.sd7', (string) file_get_contents($this->errorLog));
+    }
+
+    public function test_handle_creates_missing_state_folders(): void
+    {
+        TempMirror::destroy($this->paths);
+        $this->paths = TempMirror::create();
+        rmdir($this->paths->state() . '/used');
+        rmdir($this->paths->state());
+        $r = $this->upload();
+        $this->assertSame(201, $r->status);
+        $this->assertFileExists($this->paths->state() . '/used/up-1');
+        $this->assertSame(0700, fileperms($this->paths->state() . '/used') & 0777);
+    }
+
+    public function test_failed_used_marker_write_is_logged_and_still_returns_201(): void
+    {
+        $this->assertSame(200, $this->post('abcd', '0')->status);
+        chmod($this->paths->state() . '/used', 0500);
+        $r = $this->post('efghij', '4');
+        $this->assertSame(201, $r->status);
+        $this->assertStringContainsString('cannot write used marker', (string) file_get_contents($this->errorLog));
+    }
+
+    public function test_failed_rename_deletes_the_partial_and_returns_500(): void
+    {
+        $this->assertSame(200, $this->post('abcd', '0')->status);
+        chmod($this->paths->maps(), 0555);
+        $r = $this->post('efghij', '4');
+        $this->assertSame(500, $r->status);
+        $this->assertSame(['error' => 'write_failed'], $r->body);
+        $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
+    }
+
+    public function test_unreadable_folder_fails_closed_instead_of_skipping_the_exists_check(): void
+    {
+        $this->assertSame(200, $this->post('abcd', '0')->status);
+        chmod($this->paths->maps(), 0300);
+        $r = $this->post('efghij', '4');
+        chmod($this->paths->maps(), 0755);
+        $this->assertSame(500, $r->status);
+        $this->assertSame(['error' => 'write_failed'], $r->body);
+        $this->assertFileDoesNotExist($this->paths->partial() . '/upload-up-1');
+        $this->assertFileDoesNotExist($this->paths->maps() . '/test.sd7');
     }
 }

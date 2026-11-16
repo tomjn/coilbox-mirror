@@ -53,6 +53,15 @@ final class Paths
         return $this->root . '/private/state';
     }
 
+    /** Creates the state and used-marker folders when they are missing. */
+    public function ensureState(): void
+    {
+        $used = $this->state() . '/used';
+        if (!is_dir($used) && !@mkdir($used, 0700, true) && !is_dir($used)) {
+            throw new \RuntimeException("Cannot create $used");
+        }
+    }
+
     public function config(): string
     {
         return $this->root . '/private/config.php';
