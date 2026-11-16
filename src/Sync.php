@@ -127,9 +127,15 @@ final class Sync
 
         $missing = [];
         foreach ($held['archives'] as $archive) {
-            if (!$this->isOnDisk($own, $archive) && !$this->store->isRemoved($archive['sha256'], $archive['filename'])) {
-                $missing[] = $archive;
+            if ($this->isOnDisk($own, $archive) || $this->store->isRemoved($archive['sha256'], $archive['filename'])) {
+                continue;
             }
+            $clash = $this->nameTakenByOtherHash($own, $archive);
+            if ($clash !== null) {
+                $this->log("conflict: {$clash['filename']} is already here with different bytes, not downloaded");
+                continue;
+            }
+            $missing[] = $archive;
         }
         if ($missing === []) {
             return;
@@ -175,6 +181,18 @@ final class Sync
             }
         }
         return false;
+    }
+
+    /** Returns the listed file with the same kind and name in any letter case, when its hash differs. */
+    private function nameTakenByOtherHash(array $listing, array $archive): ?array
+    {
+        $name = mb_strtolower($archive['filename']);
+        foreach ($listing['files'] as $file) {
+            if ($file['kind'] === $archive['kind'] && mb_strtolower($file['filename']) === $name && $file['sha256'] !== $archive['sha256']) {
+                return $file;
+            }
+        }
+        return null;
     }
 
     /** @return bool false when the whole fetch should stop */

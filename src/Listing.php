@@ -25,6 +25,11 @@ final class Listing
                 if (!Filename::isValid($name) || !is_file("$dir/$name")) {
                     continue;
                 }
+                // An empty file is never a real archive, and a listing entry needs size >= 1.
+                clearstatcache(true, "$dir/$name");
+                if (filesize("$dir/$name") === 0) {
+                    continue;
+                }
                 $files[] = self::entry($p, $kind, $name, $previous === null ? null : self::find($previous, $kind, $name));
             }
         }

@@ -273,6 +273,22 @@ final class SyncFetchTest extends TestCase
         $this->assertNotEmpty(array_filter($this->log, static fn (string $l) => str_contains($l, 'conflict')));
     }
 
+    public function test_name_already_listed_with_other_hash_is_not_downloaded(): void
+    {
+        $a = self::archive('One.sd7', 'new bytes');
+        $this->hold([$a]);
+        $this->peerHas('m2', [$a]);
+        $this->peerServes('m2', 'maps', 'One.sd7', 'new bytes');
+        file_put_contents($this->paths->maps() . '/ONE.sd7', 'old bytes');
+        Listing::write($this->paths, Listing::build($this->paths, null, self::NOW));
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame([], $this->http->downloads);
+        $this->assertSame('old bytes', file_get_contents($this->paths->maps() . '/ONE.sd7'));
+        $this->assertNotEmpty(array_filter($this->log, static fn (string $l) => str_contains($l, 'conflict')));
+    }
+
     public function test_existing_name_in_another_letter_case_is_not_duplicated(): void
     {
         $a = self::archive('one.sd7', 'same bytes');

@@ -55,6 +55,22 @@ final class ListingTest extends TestCase
         }
     }
 
+    public function test_skips_empty_files_so_the_listing_stays_valid(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->maps() . '/empty.sd7', '');
+            file_put_contents($paths->maps() . '/ok.sd7', 'x');
+
+            $doc = Listing::build($paths, null, 1795000100);
+
+            $this->assertSame(['ok.sd7'], array_column($doc['files'], 'filename'));
+            $this->assertTrue(Listing::isValidDoc($doc));
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
     public function test_reuses_previous_hash_when_size_and_mtime_match(): void
     {
         $paths = TempMirror::create();
