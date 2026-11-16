@@ -1,0 +1,65 @@
+# Coilbox mirror - static file archive plus two PHP entry points, upload.php and limits.php.
+# Nothing else here is ever executed. Needs Apache 2.4.
+
+# ---------------------------------------------------------------
+# 1. Refuse to serve anything script-shaped, then dotfiles and project files.
+# The pattern matches the extension anywhere in the name, because Apache applies
+# the handler of every extension in a chain, so "notes.php.txt" can reach PHP.
+# ---------------------------------------------------------------
+<FilesMatch "\.(php[0-9]?|phtml|phps|phar|inc|cgi|pl|py|sh|bash|shtml|jsp|asp|aspx)(\.|$)">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "^(composer\.json|composer\.lock|phpunit\.xml\.dist)$">
+  Require all denied
+</FilesMatch>
+
+RedirectMatch 404 /\.(git|partial)(/|$)
+
+# The two public entry points. This comes after the denies because a later
+# section overrides an earlier one.
+<FilesMatch "^(upload|limits)\.php$">
+  Require all granted
+</FilesMatch>
+
+# ---------------------------------------------------------------
+# 2. Strip the handlers of every script extension except .php, so a missed file
+# is served as inert text. The entry points need PHP's own handler.
+# php_flag is deliberately absent: DreamHost runs PHP as CGI/FastCGI, where
+# php_flag in .htaccess returns 500 on every request.
+# ---------------------------------------------------------------
+RemoveHandler .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
+RemoveType .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
+RemoveHandler .cgi .pl .py .sh .shtml
+
+# No CGI, no server-side includes.
+Options -ExecCGI -Includes -Indexes -FollowSymLinks +SymLinksIfOwnerMatch
+
+# ---------------------------------------------------------------
+# 3. No directory listing at the root.
+# ---------------------------------------------------------------
+DirectoryIndex index.html
+
+# ---------------------------------------------------------------
+# 4. Game archives download rather than render as text.
+# ---------------------------------------------------------------
+AddType application/octet-stream .sd7 .sdz .sdd .sdf .sgc .tdf .chk .obj .patch
+AddType application/octet-stream .exe .dll .so .msi .gadget
+AddType application/x-7z-compressed .7z
+AddType application/zip .zip
+AddType application/x-rar-compressed .rar
+AddType text/plain .sig
+AddType application/json .json
+
+# ---------------------------------------------------------------
+# 5. Modest hardening headers.
+# ---------------------------------------------------------------
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "no-referrer-when-downgrade"
+</IfModule>

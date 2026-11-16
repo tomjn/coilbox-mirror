@@ -1,0 +1,12 @@
+# Archives only. Nothing in this folder can run.
+RemoveHandler .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc .cgi .pl .py .sh .bash .shtml .jsp .asp .aspx
+RemoveType .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc .cgi .pl .py .sh .bash .shtml .jsp .asp .aspx
+
+# Apache lists the folder, which is how peers and people find files.
+Options +Indexes
+DirectoryIndex disabled
+
+# This overrides the root deny, so a valid archive name like x.php.sd7 still downloads.
+<FilesMatch "\.(?i:sd7|sdz)$">
+  Require all granted
+</FilesMatch>
