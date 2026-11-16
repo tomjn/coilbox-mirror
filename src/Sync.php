@@ -196,10 +196,13 @@ final class Sync
     private function withDiskLock(Closure $fn): void
     {
         $lock = Lock::acquire($this->paths->state() . '/disk.lock', true);
+        if ($lock === null) {
+            throw new \RuntimeException('Could not take the disk lock');
+        }
         try {
             $fn();
         } finally {
-            $lock?->release();
+            $lock->release();
         }
     }
 

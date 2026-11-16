@@ -157,6 +157,27 @@ final class SyncCatalogueTest extends TestCase
         $this->assertSame(6, $this->store->heldSeq());
     }
 
+    public function test_hub_html_200_keeps_held_catalogue_and_tries_peers(): void
+    {
+        $this->hold(5);
+        $this->http->on(self::HUB . '/api/v1/catalogue', new HttpResponse(200, '<html>Maintenance</html>'));
+        $this->http->on(self::HUB . '/api/v1/catalogue.sig', new HttpResponse(200, '<html>Maintenance</html>'));
+        $this->servePeer('m2', $this->doc(6));
+        $this->assertSame('peer:m2', $this->sync()->refreshCatalogue());
+        $this->assertSame(6, $this->store->heldSeq());
+    }
+
+    public function test_hub_truncated_catalogue_keeps_held_catalogue_and_tries_peers(): void
+    {
+        $this->hold(5);
+        $full = Json::encode($this->doc(6));
+        $this->http->on(self::HUB . '/api/v1/catalogue', new HttpResponse(200, substr($full, 0, intdiv(strlen($full), 2))));
+        $this->http->on(self::HUB . '/api/v1/catalogue.sig', new HttpResponse(200, Signer::sign(Crypto::CTX_CATALOGUE, $full, $this->hubKey['secret'])));
+        $this->servePeer('m2', $this->doc(6));
+        $this->assertSame('peer:m2', $this->sync()->refreshCatalogue());
+        $this->assertSame(6, $this->store->heldSeq());
+    }
+
     public function test_peer_with_bad_signature_is_skipped_for_next_peer(): void
     {
         $this->hold(5);
@@ -256,5 +277,6 @@ final class SyncCatalogueTest extends TestCase
     {
         $this->http->on(self::HUB . '/api/v1/mirrors/report', new HttpResponse(200, '{}'));
         $this->assertSame(1, $this->sync()->run());
+        $this->assertCount(1, $this->http->posts);
     }
 }
