@@ -1,0 +1,121 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Mirror;
+
+/** Outbound HTTP over PHP URL streams, so it needs allow_url_fopen and openssl. */
+final class StreamHttpClient implements HttpClient
+{
+    private const USER_AGENT = 'coilbox-mirror';
+    private const BLOCK = 8192;
+
+    public function get(string $url): HttpResponse
+    {
+        return $this->request($url, $this->context('GET', []));
+    }
+
+    public function postJson(string $url, string $body): HttpResponse
+    {
+        return $this->request($url, $this->context('POST', ['Content-Type: application/json'], $body));
+    }
+
+    public function download(string $url, string $dest, int $expectedSize, Deadline $deadline): DownloadResult
+    {
+        clearstatcache(true, $dest);
+        $have = is_file($dest) ? (int) filesize($dest) : 0;
+        if ($have === $expectedSize) {
+            return DownloadResult::Complete;
+        }
+
+        $headers = [];
+        if ($have > 0 && $have < $expectedSize) {
+            $headers[] = 'Range: bytes=' . $have . '-';
+        }
+        $in = @fopen($url, 'rb', false, $this->context('GET', $headers));
+        if ($in === false) {
+            return DownloadResult::Failed;
+        }
+        $status = self::status();
+        if ($status !== 200 && $status !== 206) {
+            fclose($in);
+            return DownloadResult::Failed;
+        }
+
+        // A 206 continues the partial file. A 200 means the server ignored the range, so start again.
+        $out = @fopen($dest, $status === 206 ? 'ab' : 'wb');
+        if ($out === false) {
+            fclose($in);
+            return DownloadResult::Failed;
+        }
+        $size = $status === 206 ? $have : 0;
+
+        $result = DownloadResult::Complete;
+        while (!feof($in)) {
+            $block = $deadline->step(static fn (): string|false => fread($in, self::BLOCK));
+            if ($block === false || ($block === '' && !feof($in))) {
+                $result = DownloadResult::Failed;
+                break;
+            }
+            if ($block !== '') {
+                if (fwrite($out, $block) !== strlen($block)) {
+                    $result = DownloadResult::Failed;
+                    break;
+                }
+                $size += strlen($block);
+            }
+            if ($size > $expectedSize) {
+                $result = DownloadResult::Failed;
+                break;
+            }
+            if ($size < $expectedSize && !feof($in) && $deadline->expired()) {
+                $result = DownloadResult::Stopped;
+                break;
+            }
+        }
+        fclose($in);
+        fclose($out);
+
+        if ($result === DownloadResult::Complete && $size !== $expectedSize) {
+            return DownloadResult::Failed;
+        }
+        return $result;
+    }
+
+    /** @param list<string> $headers */
+    private function context(string $method, array $headers, ?string $body = null)
+    {
+        $headers[] = 'User-Agent: ' . self::USER_AGENT;
+        $http = [
+            'method' => $method,
+            'header' => implode("\r\n", $headers),
+            'ignore_errors' => true,
+            'timeout' => (float) ini_get('default_socket_timeout'),
+        ];
+        if ($body !== null) {
+            $http['content'] = $body;
+        }
+        return stream_context_create(['http' => $http]);
+    }
+
+    private function request(string $url, $context): HttpResponse
+    {
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false) {
+            return new HttpResponse(0, '');
+        }
+        return new HttpResponse(self::status(), $body);
+    }
+
+    /** Redirects add earlier status lines, so the last one is the final response. */
+    private static function status(): int
+    {
+        $status = 0;
+        foreach (http_get_last_response_headers() ?? [] as $line) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m) === 1) {
+                $status = (int) $m[1];
+            }
+        }
+        return $status;
+    }
+}
