@@ -1,0 +1,13 @@
+vendor/
+private/config.php
+private/state/
+.partial/*
+!.partial/.htaccess
+maps/*
+!maps/.htaccess
+games/*
+!games/.htaccess
+catalogue.json
+catalogue.sig
+listing.json
+.phpunit.cache/
