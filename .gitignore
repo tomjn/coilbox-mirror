@@ -7,7 +7,7 @@ maps/*
 !maps/.htaccess
 games/*
 !games/.htaccess
-catalogue.json
-catalogue.sig
-listing.json
+/catalogue.json
+/catalogue.sig
+/listing.json
 .phpunit.cache/

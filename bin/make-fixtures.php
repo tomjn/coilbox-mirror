@@ -102,7 +102,7 @@ $catalogue = [
     'generated_at' => $generatedAt,
     'mirrors' => [
         ['id' => $mirrorId, 'base_url' => 'https://jj.darkstars.co.uk', 'public_key' => B64::encode($mirror['public'])],
-        ['id' => 'example-two', 'base_url' => 'https://mirror.example.org/coilbox', 'public_key' => B64::encode($other['public'])],
+        ['id' => 'example-two', 'base_url' => 'https://mirror.example.org', 'public_key' => B64::encode($other['public'])],
     ],
     'archives' => [
         [

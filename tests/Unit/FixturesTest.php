@@ -45,17 +45,24 @@ final class FixturesTest extends TestCase
         $out = sys_get_temp_dir() . '/coilbox-fixtures-' . bin2hex(random_bytes(8));
         $script = __DIR__ . '/../../bin/make-fixtures.php';
         $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($out) . ' 2>&1';
-        exec($command, $lines, $status);
-        $this->assertSame(0, $status, implode("\n", $lines));
+        try {
+            exec($command, $lines, $status);
+            $this->assertSame(0, $status, implode("\n", $lines));
 
-        $committed = array_values(array_diff(scandir(self::DIR), ['.', '..']));
-        $generated = array_values(array_diff(scandir($out), ['.', '..']));
-        $this->assertSame($committed, $generated);
-        foreach ($generated as $name) {
-            $this->assertSame(self::read($name), file_get_contents("$out/$name"), "fixtures/$name differs");
-            unlink("$out/$name");
+            $committed = array_values(array_diff(scandir(self::DIR), ['.', '..']));
+            $generated = array_values(array_diff(scandir($out), ['.', '..']));
+            $this->assertSame($committed, $generated);
+            foreach ($generated as $name) {
+                $this->assertSame(self::read($name), file_get_contents("$out/$name"), "fixtures/$name differs");
+            }
+        } finally {
+            foreach (glob("$out/*") ?: [] as $file) {
+                unlink($file);
+            }
+            if (is_dir($out)) {
+                rmdir($out);
+            }
         }
-        rmdir($out);
     }
 
     public function test_token_fixture_verifies(): void
@@ -108,13 +115,17 @@ final class FixturesTest extends TestCase
 
     public function test_rotated_catalogue_alone_is_rejected_without_the_old_key(): void
     {
-        $this->expectException(CatalogueRejected::class);
-        \Mirror\Catalogue::verify(
-            self::read('catalogue-rotated.json'),
-            self::read('catalogue-rotated.sig'),
-            [self::key('mirror_public_key')],
-            null,
-        );
+        try {
+            \Mirror\Catalogue::verify(
+                self::read('catalogue-rotated.json'),
+                self::read('catalogue-rotated.sig'),
+                [self::key('mirror_public_key')],
+                null,
+            );
+            $this->fail('Expected CatalogueRejected');
+        } catch (CatalogueRejected $e) {
+            $this->assertSame('bad_key_endorsement', $e->reason);
+        }
     }
 
     public function test_report_fixtures_verify_with_mirror_key(): void

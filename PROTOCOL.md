@@ -94,7 +94,7 @@ The mirror checks a token in this order. The first failure ends the check.
 
 The id check comes after the signature check on purpose. Someone without a valid signature learns nothing about the mirror's id. The `start_by` check happens later, at the first chunk (see section 3).
 
-A token is valid for one upload id. When the file is finished, the mirror records the id as used, and later requests with that token get `used`.
+A token is valid for one upload id. When the file is finished, the mirror records the id as used, and a later `POST` with that token gets `used`. A later `GET` answers `200` with `complete` set to `true`.
 
 Fixtures: `fixtures/token.txt` and `fixtures/token.payload.json`, which holds the decoded payload as the hub serialised it.
 
@@ -173,7 +173,7 @@ When the last chunk arrives, the mirror takes the disk lock and does this.
 4. Record the upload id as used.
 5. Add the file to `listing.json` (section 5) and send an `upload` report to the hub (section 7). A failure in this step does not fail the upload.
 
-If the mirror cannot take the disk lock, read the folder or move the file, it deletes the partial and answers `write_failed`.
+If the mirror cannot take the disk lock, read the target folder or move the file, it deletes the partial and answers `write_failed`.
 
 ### Errors
 
@@ -191,7 +191,7 @@ An error response has the shape `{"error": "<code>"}`. `bad_offset` also carries
 | `exists` | 409 | A file with this name, in any letter case, is already in the folder. |
 | `too_large` | 413 | The chunk would take the file past `size`. |
 | `hash_mismatch` | 422 | The finished file's SHA-256 is not the token's. The partial is deleted. |
-| `write_failed` | 500 | The mirror could not write, lock or move the file. |
+| `write_failed` | 500 | The mirror could not seek or write the chunk, or finishing failed because it could not take the disk lock, read the target folder or move the file. A failure to lock the partial file is `internal_error` instead. |
 | `method_not_allowed` | 405 | The method is not `GET` or `POST`. |
 | `not_configured` | 503 | `private/config.php` is missing or invalid. |
 | `internal_error` | 500 | Any other failure. The reason goes to the server log and never to the response. |
@@ -211,7 +211,7 @@ Unfinished partial files are deleted by `sync.php` once they are older than the 
 The mirror works the figure out from PHP's own settings.
 
 - If `file_uploads` is off, or `upload_max_filesize` is 0 or malformed, uploads are disabled.
-- If `post_max_size` is 0, which PHP reads as no limit, `max_chunk_bytes` is `upload_max_filesize`.
+- If `post_max_size` is 0, or is malformed so that PHP reads it as 0, which means no limit, `max_chunk_bytes` is `upload_max_filesize`.
 - Otherwise it is the smaller of `upload_max_filesize` and `post_max_size` minus the envelope.
 - If that result is below 1, uploads are disabled.
 
@@ -267,7 +267,7 @@ Each entry in `files` has these keys.
 
 The mirror rewrites the listing at the start and end of every sync, and adds a file as soon as an upload or a peer download finishes. A listing on disk that fails the rules below counts as missing, and the mirror rebuilds it.
 
-### isValidDoc
+### What makes a listing valid
 
 The mirror calls a listing valid, and so usable, only when all of these hold. Peer listings go through the same check.
 
@@ -332,7 +332,7 @@ Top level:
 Each `mirrors` entry:
 
 - `id` matches the mirror id rule in section 1.
-- `base_url` starts with `http://` or `https://`, has a host, may have a path, has no query, no fragment, no whitespace and no trailing slash. Mirrors are expected at the domain root, and the shipped `.htaccess` assumes it. A mirror in a subfolder works only if its operator edits the path in that file. The mirror reaches its peers at `{base_url}/catalogue.json`, `{base_url}/listing.json` and `{base_url}/maps/<name>`.
+- `base_url` starts with `http://` or `https://`, has a host, may have a path, has no query, no fragment, no whitespace and no trailing slash. Mirrors are expected at the domain root, and the shipped `.htaccess` assumes it. A mirror in a subfolder works only if its operator edits the path in that file. The mirror reaches its peers at `{base_url}/catalogue.json`, `{base_url}/listing.json`, and `{base_url}/maps/<name>` or `{base_url}/games/<name>` for archives. `<name>` is the filename percent-encoded with PHP's `rawurlencode`, so `Test Map (v1.2) é.sd7` becomes `Test%20Map%20%28v1.2%29%20%C3%A9.sd7`.
 - `public_key` is base64url and decodes to 32 bytes.
 
 Each `archives` entry:
