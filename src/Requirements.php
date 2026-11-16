@@ -9,8 +9,12 @@ final class Requirements
 {
     private const REQUIRED_EXTENSIONS = ['sodium', 'hash', 'json', 'openssl', 'mbstring'];
 
-    /** Paths that must not be served. A 403 or a 404 are both fine. */
-    private const HIDDEN = ['private/config.php', 'private/state/', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'];
+    /**
+     * Paths that must not be served. A 403 or a 404 are both fine.
+     * private/canary.txt is a real file, so it shows the private folder's files are blocked.
+     * A directory URL like .partial/ only shows that the folder is not listed.
+     */
+    private const HIDDEN = ['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'];
 
     /**
      * Checks the PHP version, extensions, ini settings, config and writable folders.
@@ -50,7 +54,9 @@ final class Requirements
             $problems[] = $e->getMessage();
         }
 
-        $folders = ['maps/' => $p->maps(), 'games/' => $p->games(), '.partial/' => $p->partial(), 'private/state/' => $p->state()];
+        // private/state/ is made by the first request, so on a fresh install it is enough that private/ is writable.
+        $state = is_dir($p->state()) || !is_dir($p->private()) ? $p->state() : $p->private();
+        $folders = ['maps/' => $p->maps(), 'games/' => $p->games(), '.partial/' => $p->partial(), 'private/state/' => $state];
         foreach ($folders as $name => $dir) {
             if (!is_dir($dir) || !is_writable($dir)) {
                 $problems[] = "$name is missing or not writable by the PHP user.";

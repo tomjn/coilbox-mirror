@@ -1,0 +1,1 @@
+This file must never be downloadable. If you can read it over the web, the private folder is exposed.

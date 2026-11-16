@@ -64,7 +64,7 @@ final class RequirementsTest extends TestCase
     private function cleanRemote(): FakeHttpClient
     {
         $http = new FakeHttpClient();
-        foreach (['private/config.php', 'private/state/', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'] as $i => $path) {
+        foreach (['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'] as $i => $path) {
             $http->on(self::BASE . '/' . $path, new HttpResponse($i % 2 === 0 ? 403 : 404, ''));
         }
         $http->on(self::BASE . '/maps/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /maps</body></html>'));
@@ -124,6 +124,30 @@ final class RequirementsTest extends TestCase
         $this->assertStringContainsString('.partial/', $problems[0]);
     }
 
+    public function test_fresh_install_without_state_folder_is_fine_when_private_is_writable(): void
+    {
+        rmdir($this->paths->state() . '/used');
+        rmdir($this->paths->state());
+        $this->assertSame([], Requirements::local($this->paths, $this->ini(), $this->extensions()));
+    }
+
+    public function test_missing_state_folder_is_named_when_private_is_not_writable(): void
+    {
+        rmdir($this->paths->state() . '/used');
+        rmdir($this->paths->state());
+        chmod($this->paths->private(), 0555);
+        try {
+            if (is_writable($this->paths->private())) {
+                $this->markTestSkipped('This user can write to read only folders.');
+            }
+            $problems = Requirements::local($this->paths, $this->ini(), $this->extensions());
+            $this->assertCount(1, $problems);
+            $this->assertStringContainsString('private/state/', $problems[0]);
+        } finally {
+            chmod($this->paths->private(), 0777);
+        }
+    }
+
     public function test_bad_config_is_named(): void
     {
         file_put_contents($this->paths->config(), '<?php return [];');
@@ -154,6 +178,22 @@ final class RequirementsTest extends TestCase
         $problems = Requirements::remote($http, self::BASE);
         $this->assertCount(1, $problems);
         $this->assertStringContainsString('private/config.php', $problems[0]);
+    }
+
+    public function test_remote_flags_a_downloadable_canary_file(): void
+    {
+        $http = $this->cleanRemote();
+        $http->on(self::BASE . '/private/canary.txt', new HttpResponse(200, 'This file must never be downloadable.'));
+        $problems = Requirements::remote($http, self::BASE);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('private/canary.txt', $problems[0]);
+    }
+
+    public function test_remote_does_not_request_the_private_state_folder(): void
+    {
+        $http = $this->cleanRemote();
+        $http->on(self::BASE . '/private/state/', new HttpResponse(200, 'listing'));
+        $this->assertSame([], Requirements::remote($http, self::BASE));
     }
 
     public function test_remote_flags_an_unreachable_hidden_path(): void

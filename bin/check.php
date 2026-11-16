@@ -7,6 +7,8 @@ declare(strict_types=1);
 //   php bin/check.php [--root=<folder>] [--url=https://mirror.example] [--probe-file=maps/<name>]
 //
 // With --url it also requests the mirror over HTTP to check what the web server exposes.
+// The private folder is checked through the real file private/canary.txt. The .partial/
+// folder is only checked by its directory URL, so a file inside it is not requested.
 // It prints each problem and exits 1, or prints ok and exits 0. It writes no files.
 
 require __DIR__ . '/../src/bootstrap.php';
@@ -60,6 +62,10 @@ if ($raw === false) {
     } else {
         $problems[] = 'catalogue.json is held but cannot be read as a catalogue.';
     }
+}
+
+if (isset($options['url'])) {
+    echo "note: .partial/ is only checked by its directory URL, not by a file inside it\n";
 }
 
 if ($webChunk !== null) {
