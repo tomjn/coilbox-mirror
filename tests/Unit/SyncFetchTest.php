@@ -378,6 +378,26 @@ final class SyncFetchTest extends TestCase
         $this->assertSame([], $this->http->downloads);
     }
 
+    public function test_peer_listing_over_the_size_cap_is_skipped_and_logged(): void
+    {
+        $a = self::archive('one.sd7', 'good bytes');
+        $this->hold([$a]);
+        $many = [$a];
+        for ($i = 0; $i < 200; $i++) {
+            $many[] = self::archive("filler-$i.sd7", "filler $i");
+        }
+        $this->peerHas('m2', $many);
+        $this->peerHas('m3', [$a]);
+        $this->peerServes('m2', 'maps', 'one.sd7', 'good bytes');
+        $this->peerServes('m3', 'maps', 'one.sd7', 'good bytes');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame(['https://m3.example/maps/one.sd7'], $this->http->downloads);
+        $this->assertNotEmpty(array_filter($this->log, static fn (string $l) => str_contains($l, 'peer:m2') && str_contains($l, 'skipped')));
+        $this->assertFileExists($this->paths->maps() . '/one.sd7');
+    }
+
     public function test_this_mirror_is_not_asked_for_its_own_files(): void
     {
         $a = self::archive('one.sd7', 'good bytes');

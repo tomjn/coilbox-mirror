@@ -141,7 +141,7 @@ final class Sync
             return;
         }
 
-        $peers = $this->peerListings($held['mirrors']);
+        $peers = $this->peerListings($held['mirrors'], count($held['archives']));
         foreach ($missing as $archive) {
             if ($this->deadline->expired()) {
                 $this->log('fetch stopped: out of time');
@@ -154,17 +154,19 @@ final class Sync
     }
 
     /** @return array<string, array> each usable peer's listing, keyed by base URL */
-    private function peerListings(array $mirrors): array
+    private function peerListings(array $mirrors, int $archiveCount): array
     {
+        // Policy: a peer listing may hold as many unknown files as there are catalogue archives, so the factor is 2.
+        $cap = Listing::maxDocBytes(2 * $archiveCount + 1);
         $listings = [];
         foreach ($mirrors as $peer) {
             if ($peer['id'] === $this->config->mirrorId) {
                 continue;
             }
-            $response = $this->http->get($peer['base_url'] . '/listing.json');
+            $response = $this->http->get($peer['base_url'] . '/listing.json', $cap);
             $doc = $response->status === 200 ? Json::decodeObject($response->body) : null;
             if ($doc === null || !Listing::isValidDoc($doc)) {
-                $this->log('listing from peer:' . $peer['id'] . ' skipped');
+                $this->log('listing from peer:' . $peer['id'] . ' skipped, missing, malformed or over ' . $cap . ' bytes');
                 continue;
             }
             $listings[$peer['base_url']] = $doc;

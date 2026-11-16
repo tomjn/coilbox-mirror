@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mirror\Tests\Unit;
 
+use Mirror\Json;
 use Mirror\Listing;
 use Mirror\Tests\Support\TempMirror;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -191,6 +192,20 @@ final class ListingTest extends TestCase
     public function test_is_valid_doc_rejects_malformed_listings(array $doc): void
     {
         $this->assertFalse(Listing::isValidDoc($doc));
+    }
+
+    public function test_max_doc_bytes_covers_worst_case_listings(): void
+    {
+        $names = ['x' . str_repeat("\u{2028}", 83) . '.sd7', str_repeat('"', 251) . '.sd7', str_repeat('a', 251) . '.sd7'];
+        foreach ([0, 1, 5] as $count) {
+            $files = [];
+            for ($i = 0; $i < $count; $i++) {
+                $files[] = ['filename' => $names[$i % 3], 'kind' => 'game', 'size' => PHP_INT_MAX, 'sha256' => str_repeat('f', 64), 'mtime' => PHP_INT_MAX];
+            }
+            $doc = ['v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => $files];
+            $this->assertTrue(Listing::isValidDoc($doc));
+            $this->assertGreaterThanOrEqual(strlen(Json::encode($doc)), Listing::maxDocBytes($count));
+        }
     }
 
     public function test_load_returns_null_when_an_entry_is_malformed(): void

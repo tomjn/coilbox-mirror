@@ -72,6 +72,25 @@ final class Listing
         return true;
     }
 
+    /**
+     * The most bytes a listing document with up to $entries files can need. Callers use it to
+     * refuse a larger download before it fills memory.
+     */
+    public static function maxDocBytes(int $entries): int
+    {
+        $entry = Json::encode([
+            'filename' => str_repeat('a', 255),
+            'kind' => 'game',
+            'size' => PHP_INT_MAX,
+            'sha256' => str_repeat('f', 64),
+            'mtime' => PHP_INT_MAX,
+        ]);
+        // Allow every filename byte to be escaped to six bytes, and one comma between entries.
+        $maxEntry = strlen($entry) + 255 * 6 - 255 + 1;
+        $envelope = strlen(Json::encode(['v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => []]));
+        return $entries * $maxEntry + $envelope;
+    }
+
     /** Writes to a uniquely named temp file in the same folder, then renames it into place. */
     public static function write(Paths $p, array $doc): void
     {

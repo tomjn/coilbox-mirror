@@ -6,7 +6,8 @@ namespace Mirror;
 
 interface HttpClient
 {
-    public function get(string $url): HttpResponse;
+    /** Returns status 0 and an empty body when the body is longer than $maxBytes. */
+    public function get(string $url, ?int $maxBytes = null): HttpResponse;
 
     public function postJson(string $url, string $body): HttpResponse;
 

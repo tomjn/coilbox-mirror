@@ -266,7 +266,7 @@ final class UploadFinishTest extends TestCase
     public function test_report_that_throws_gives_reported_false(): void
     {
         $http = new class implements HttpClient {
-            public function get(string $url): HttpResponse
+            public function get(string $url, ?int $maxBytes = null): HttpResponse
             {
                 throw new \RuntimeException('hub unreachable');
             }

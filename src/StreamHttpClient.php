@@ -10,9 +10,9 @@ final class StreamHttpClient implements HttpClient
     private const USER_AGENT = 'coilbox-mirror';
     private const BLOCK = 8192;
 
-    public function get(string $url): HttpResponse
+    public function get(string $url, ?int $maxBytes = null): HttpResponse
     {
-        return $this->request($url, $this->context('GET', []));
+        return $this->request($url, $this->context('GET', []), $maxBytes);
     }
 
     public function postJson(string $url, string $body): HttpResponse
@@ -98,10 +98,13 @@ final class StreamHttpClient implements HttpClient
         return stream_context_create(['http' => $http]);
     }
 
-    private function request(string $url, $context): HttpResponse
+    private function request(string $url, $context, ?int $maxBytes = null): HttpResponse
     {
-        $body = @file_get_contents($url, false, $context);
-        if ($body === false) {
+        // Reading one byte past the limit is enough to know the body is too long.
+        $body = $maxBytes === null
+            ? @file_get_contents($url, false, $context)
+            : @file_get_contents($url, false, $context, 0, $maxBytes + 1);
+        if ($body === false || ($maxBytes !== null && strlen($body) > $maxBytes)) {
             return new HttpResponse(0, '');
         }
         return new HttpResponse(self::status(), $body);

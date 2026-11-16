@@ -38,9 +38,13 @@ final class FakeHttpClient implements HttpClient
         $this->responses[$url] = $r;
     }
 
-    public function get(string $url): HttpResponse
+    public function get(string $url, ?int $maxBytes = null): HttpResponse
     {
-        return $this->responses[$url] ?? new HttpResponse(0, '');
+        $r = $this->responses[$url] ?? new HttpResponse(0, '');
+        if ($maxBytes !== null && strlen($r->body) > $maxBytes) {
+            return new HttpResponse(0, '');
+        }
+        return $r;
     }
 
     public function postJson(string $url, string $body): HttpResponse
