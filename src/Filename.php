@@ -7,8 +7,8 @@ namespace Mirror;
 final class Filename
 {
     /**
-     * True for a valid UTF-8 name of 1 to 255 bytes that holds no slash, backslash, NUL or control
-     * character, does not start with a dot, and ends in .sd7 or .sdz in any case.
+     * True for a valid UTF-8 name of 1 to 255 bytes that holds no slash, backslash, control, format, line
+     * separator or paragraph separator character, does not start with a dot, and ends in .sd7 or .sdz in any case.
      */
     public static function isValid(string $name): bool
     {
@@ -16,7 +16,9 @@ final class Filename
         if ($length < 1 || $length > 255) {
             return false;
         }
-        // The u modifier fails on invalid UTF-8. \p{Cc} covers NUL, C0, DEL and C1 controls.
-        return preg_match('/\A[^\/\\\\\p{Cc}.][^\/\\\\\p{Cc}]*\.(?:sd7|sdz)\z/iu', $name) === 1;
+        // The u modifier fails on invalid UTF-8. \p{Cc} covers NUL, C0, DEL and C1 controls. \p{Cf} covers
+        // invisible format characters such as U+202E, which flips text so a listing can show a fake extension,
+        // and U+FEFF. \p{Zl} and \p{Zp} are the line and paragraph separators U+2028 and U+2029.
+        return preg_match('/\A[^\/\\\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}.][^\/\\\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*\.(?:sd7|sdz)\z/iu', $name) === 1;
     }
 }

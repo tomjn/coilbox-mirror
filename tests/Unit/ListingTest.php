@@ -210,7 +210,9 @@ final class ListingTest extends TestCase
 
     public function test_max_doc_bytes_covers_worst_case_listings(): void
     {
-        $names = ['x' . str_repeat("\u{2028}", 83) . '.sd7', str_repeat('"', 251) . '.sd7', str_repeat('a', 251) . '.sd7'];
+        // U+2028 was the worst escape until Filename refused it. maxDocBytes still allows six bytes for every
+        // filename byte, so it stays an upper bound. The longest valid escape left is a quote, two bytes for one.
+        $names = ['x' . str_repeat("\u{E9}", 125) . '.sd7', str_repeat('"', 251) . '.sd7', str_repeat('a', 251) . '.sd7'];
         foreach ([0, 1, 5] as $count) {
             $files = [];
             for ($i = 0; $i < $count; $i++) {

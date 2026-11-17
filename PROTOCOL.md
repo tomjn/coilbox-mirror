@@ -79,7 +79,7 @@ The payload has exactly these eight keys. A missing key or an extra key makes th
 
 ### Archive filenames
 
-A valid filename is valid UTF-8, 1 to 255 bytes long, and ends in `.sd7` or `.sdz` in any letter case. It does not start with a dot. It contains no `/`, no `\`, no NUL and no control character (Unicode category Cc, which includes DEL and the C1 controls). Spaces, parentheses, extra dots and non-ASCII letters are fine. The mirror stores the name unchanged.
+A valid filename is valid UTF-8, 1 to 255 bytes long, and ends in `.sd7` or `.sdz` in any letter case. It does not start with a dot. It contains no `/`, no `\`, no NUL, no control character (Unicode category Cc, which includes DEL and the C1 controls), no format character (category Cf, such as U+202E RIGHT-TO-LEFT OVERRIDE, U+200B ZERO WIDTH SPACE and U+FEFF), and no line or paragraph separator (categories Zl and Zp, U+2028 and U+2029). Format characters are invisible and can make a directory listing show a fake extension. The hub must apply the same rule. Spaces, parentheses, extra dots and non-ASCII letters are fine. The mirror stores the name unchanged.
 
 A kind decides the folder. `map` files live in `maps/` and `game` files live in `games/`.
 
