@@ -25,8 +25,11 @@ RedirectMatch 404 /\.(git|partial)(/|$)
 # apply in every subfolder, so the grant checks the full path. It assumes the
 # mirror sits at the domain root. A subfolder install must put its prefix
 # in the expression, for example m#^/mirror/(upload|limits)\.php$#.
+# Hosts that run PHP through mod_fcgid, such as DreamHost, refuse to run it
+# without ExecCGI, which the rest of the site turns off below.
 <FilesMatch "^(upload|limits)\.php$">
   Require expr "%{REQUEST_URI} =~ m#^/(upload|limits)\.php$#"
+  Options +ExecCGI
 </FilesMatch>
 
 # ---------------------------------------------------------------
@@ -39,7 +42,7 @@ RemoveHandler .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
 RemoveType .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
 RemoveHandler .cgi .pl .py .sh .shtml
 
-# No CGI, no server-side includes.
+# No CGI or server-side includes, except ExecCGI for the two entry points above.
 Options -ExecCGI -Includes -Indexes -FollowSymLinks +SymLinksIfOwnerMatch
 
 # ---------------------------------------------------------------
