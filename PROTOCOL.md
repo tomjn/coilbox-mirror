@@ -449,7 +449,7 @@ The mirror treats any 2xx status as success and ignores the body. Any other stat
 - After an upload, a failure sets `reported` to `false` in the upload response. The mirror does not retry. The next sync sends the report again.
 - After a sync, a failure makes `sync.php` log the failure and exit with status 1.
 
-A mirror whose sync has stalled sends no sync reports. Its operator can set `sync_time_limit` in the mirror config, the longest a cron run may take in seconds. With it set, a run stops fetching before the limit, and a later run that finds an older one still going past the limit tells the operator. A mirror that has stopped reporting is worth raising with its operator.
+A mirror whose sync has stalled sends no sync reports. Its operator can set `sync_time_limit` in the mirror config, the longest a cron run may take in seconds. With it set, a run starts no new archive download once the limit has passed, and a later run that finds an older one still going past the limit tells the operator. The limit does not cover fetching the catalogue or peer listings, so a slow peer can still hold a run past it. A mirror that has stopped reporting is worth raising with its operator.
 
 ### Completing an upload whose report failed
 

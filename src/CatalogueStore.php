@@ -38,7 +38,7 @@ final class CatalogueStore
         if ($raw !== false) {
             $seq = filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
             if ($seq === false || $raw !== (string) $seq) {
-                throw new \RuntimeException('private/state/catalogue_seq is damaged, so no catalogue can be checked as newer. Put the seq of the held catalogue in it, or delete it together with catalogue.json and catalogue.sig to accept the next signed catalogue.');
+                throw new \RuntimeException('private/state/catalogue_seq is damaged, so no catalogue can be checked as newer. Delete it together with catalogue.json and catalogue.sig to accept the next signed catalogue.');
             }
             return $seq;
         }
