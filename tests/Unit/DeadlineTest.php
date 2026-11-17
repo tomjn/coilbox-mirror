@@ -9,6 +9,36 @@ use PHPUnit\Framework\TestCase;
 
 final class DeadlineTest extends TestCase
 {
+    private string|false $oldLimit = false;
+
+    protected function setUp(): void
+    {
+        $this->oldLimit = ini_get('max_execution_time');
+    }
+
+    protected function tearDown(): void
+    {
+        ini_set('max_execution_time', $this->oldLimit === false ? '0' : $this->oldLimit);
+    }
+
+    public function test_from_ini_uses_the_config_limit_when_php_has_none(): void
+    {
+        ini_set('max_execution_time', '0');
+        $this->assertSame(3000, Deadline::fromIni(3000)->limitSeconds);
+    }
+
+    public function test_from_ini_has_no_limit_when_neither_sets_one(): void
+    {
+        ini_set('max_execution_time', '0');
+        $this->assertSame(0, Deadline::fromIni(0)->limitSeconds);
+    }
+
+    public function test_from_ini_prefers_the_php_limit_when_there_is_one(): void
+    {
+        ini_set('max_execution_time', '50');
+        $this->assertSame(50, Deadline::fromIni(3000)->limitSeconds);
+    }
+
     public function test_zero_limit_never_expires(): void
     {
         $now = 0.0;

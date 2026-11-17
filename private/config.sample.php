@@ -21,4 +21,10 @@ return [
 
     // How long an unfinished upload is kept before it is deleted, in seconds. 86400 is 24 hours.
     'partial_lifetime' => 86400,
+
+    // The longest a cron run of sync.php may take, in seconds, chosen by you. 0 means no limit.
+    // The command-line PHP usually has no time limit of its own, so a peer that sends data very slowly can hold
+    // up a run for good. With a limit set, a run stops fetching before the limit, and a later run that finds an
+    // older run still going past the limit prints a failure line, so cron emails you.
+    'sync_time_limit' => 0,
 ];

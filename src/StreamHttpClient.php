@@ -4,11 +4,21 @@ declare(strict_types=1);
 
 namespace Mirror;
 
-/** Outbound HTTP over PHP URL streams, so it needs allow_url_fopen and openssl. */
+/**
+ * Outbound HTTP over PHP URL streams, so it needs allow_url_fopen and openssl.
+ *
+ * Redirects are a per-client choice. The hub is trusted, so its client may follow them. Peer URLs come from
+ * the catalogue and point at servers nobody here controls, so the peer client must not follow them. A peer
+ * that redirected to an internal address would otherwise make the mirror send requests inside its own network.
+ */
 final class StreamHttpClient implements HttpClient
 {
     private const USER_AGENT = 'coilbox-mirror';
     private const BLOCK = 8192;
+
+    public function __construct(private readonly bool $followRedirects)
+    {
+    }
 
     public function get(string $url, ?int $maxBytes = null): HttpResponse
     {
@@ -90,6 +100,7 @@ final class StreamHttpClient implements HttpClient
             'method' => $method,
             'header' => implode("\r\n", $headers),
             'ignore_errors' => true,
+            'follow_location' => $this->followRedirects ? 1 : 0,
             'timeout' => (float) ini_get('default_socket_timeout'),
         ];
         if ($body !== null) {

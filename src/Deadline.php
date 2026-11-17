@@ -14,15 +14,20 @@ final class Deadline
 
     /** @param Closure(): float $clock returns the time in seconds */
     public function __construct(
-        private readonly int $limitSeconds,
+        public readonly int $limitSeconds,
         private readonly Closure $clock,
     ) {
         $this->start = ($this->clock)();
     }
 
-    public static function fromIni(): self
+    /**
+     * Uses max_execution_time. The CLI sets that to 0, so a cron run falls back to $syncTimeLimit, the limit the
+     * operator chose in the config. When both are 0 there is no limit.
+     */
+    public static function fromIni(int $syncTimeLimit): self
     {
-        return new self((int) ini_get('max_execution_time'), static fn (): float => microtime(true));
+        $ini = (int) ini_get('max_execution_time');
+        return new self($ini > 0 ? $ini : $syncTimeLimit, static fn (): float => microtime(true));
     }
 
     /** Runs $fn and records how long it took. */

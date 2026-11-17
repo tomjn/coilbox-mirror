@@ -48,7 +48,7 @@ $problems = Requirements::local($paths, $ini, get_loaded_extensions());
 
 $webChunk = null;
 if (isset($options['url'])) {
-    $problems = [...$problems, ...Requirements::remote(new StreamHttpClient(), $options['url'], $options['probe-file'] ?? null, $webChunk)];
+    $problems = [...$problems, ...Requirements::remote(new StreamHttpClient(followRedirects: true), $options['url'], $options['probe-file'] ?? null, $webChunk)];
 }
 
 // The held catalogue shows how fresh this mirror's copy is.

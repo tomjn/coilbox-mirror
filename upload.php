@@ -21,7 +21,7 @@ try {
         $paths,
         $config,
         new CatalogueStore($paths, $config),
-        new StreamHttpClient(),
+        new StreamHttpClient(followRedirects: true),
         static fn (): int => time(),
     );
     $handler->handle(Request::fromGlobals())->send();

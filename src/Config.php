@@ -16,6 +16,7 @@ final class Config
         public readonly string $hubUrl,
         public readonly array $hubKeys,
         public readonly int $partialLifetime,
+        public readonly int $syncTimeLimit,
     ) {
     }
 
@@ -68,6 +69,12 @@ final class Config
             throw new ConfigError('partial_lifetime must be an integer greater than 0, in seconds.');
         }
 
+        // Optional, because 0 means no limit beyond PHP's own max_execution_time.
+        $syncTimeLimit = $a['sync_time_limit'] ?? 0;
+        if (!is_int($syncTimeLimit) || $syncTimeLimit < 0) {
+            throw new ConfigError('sync_time_limit must be an integer of 0 or more, in seconds. 0 means no limit.');
+        }
+
         return new self(
             $mirrorId,
             $secret,
@@ -75,6 +82,7 @@ final class Config
             rtrim($hubUrl, '/'),
             $hubKeys,
             $lifetime,
+            $syncTimeLimit,
         );
     }
 

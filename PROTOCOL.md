@@ -268,7 +268,7 @@ Each entry in `files` has these keys.
 - It sorts entries by `kind` and then by `filename` in byte order.
 - It reuses a stored `sha256` when a file's size and `mtime` are unchanged, and hashes the file otherwise.
 
-The mirror rewrites the listing at the start and end of every sync, and adds a file as soon as an upload or a peer download finishes. A listing on disk that fails the rules below counts as missing, and the mirror rebuilds it.
+The mirror rewrites the listing at the start and end of every sync, adds a file as soon as an upload or a peer download finishes, and drops a file as soon as a removal deletes it. A listing on disk that fails the rules below counts as missing, and the mirror rebuilds it.
 
 ### What makes a listing valid
 
@@ -302,6 +302,14 @@ The catalogue is the hub's signed list of mirrors, archives and removals. The hu
 Both must answer `200`. Any other status, such as an HTML error page, is a failed fetch and the mirror keeps the catalogue it holds.
 
 The mirror stores the two files exactly as received, as `catalogue.json` and `catalogue.sig` at its root. Peers fetch them from there at `{base_url}/catalogue.json` and `{base_url}/catalogue.sig`. If the hub fetch fails, or the hub's catalogue is rejected for any reason except `not_newer`, the mirror tries each other mirror in the catalogue it holds. A `not_newer` answer from the hub ends the refresh, because the mirror is already current. A peer's copy must still verify against hub keys the mirror trusts, so a peer cannot forge a catalogue.
+
+### Peer requests
+
+A mirror never follows an HTTP redirect from a peer, for any of the peer URLs in this file. A 3xx answer counts as a failed fetch. A peer must serve `catalogue.json`, `catalogue.sig`, `listing.json` and its archives directly at its `base_url`. Requests to the hub may follow redirects.
+
+A mirror reads at most twice the byte size of its held `catalogue.json` from a peer's `catalogue.json`, and at most 86 bytes from a peer's `catalogue.sig`, which is the length of a base64url Ed25519 signature. A longer answer counts as a failed fetch, and the mirror tries the next peer. The policy behind the factor of 2 is that a catalogue may grow between syncs, but a peer must not be able to exhaust the mirror's memory. The hub's catalogue has no cap, because the hub is trusted.
+
+When fetching archives, a mirror tries peers in a random order chosen once per sync. A peer that serves bytes whose SHA-256 does not match the catalogue is not asked for any other archive during that sync.
 
 ### Format
 
@@ -440,6 +448,8 @@ The mirror treats any 2xx status as success and ignores the body. Any other stat
 
 - After an upload, a failure sets `reported` to `false` in the upload response. The mirror does not retry. The next sync sends the report again.
 - After a sync, a failure makes `sync.php` log the failure and exit with status 1.
+
+A mirror whose sync has stalled sends no sync reports. Its operator can set `sync_time_limit` in the mirror config, the longest a cron run may take in seconds. With it set, a run stops fetching before the limit, and a later run that finds an older one still going past the limit tells the operator. A mirror that has stopped reporting is worth raising with its operator.
 
 The report format has no replay protection beyond `sent_at`. If the hub wants to refuse stale reports, it decides how.
 

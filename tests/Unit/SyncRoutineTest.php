@@ -53,6 +53,7 @@ final class SyncRoutineTest extends TestCase
             ['hash mismatch for maps/x.sd7 from http://a'],
             ['sync report failed: the hub did not answer with a 2xx status'],
             ['fetch failed: boom'],
+            ['sync has been running for over 3000 seconds'],
         ];
     }
 }

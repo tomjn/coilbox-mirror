@@ -56,18 +56,21 @@ final class SyncFetchTest extends TestCase
         TempMirror::destroy($this->paths);
     }
 
-    private function sync(?Deadline $deadline = null): Sync
+    /** @param \Closure(list<string>): list<string>|null $orderPeers defaults to keeping the catalogue order */
+    private function sync(?Deadline $deadline = null, ?\Closure $orderPeers = null): Sync
     {
         return new Sync(
             $this->paths,
             $this->config,
             $this->store,
             $this->http,
+            $this->http,
             $deadline ?? new Deadline(0, static fn (): float => 0.0),
             static fn (): int => self::NOW,
             function (string $line): void {
                 $this->log[] = $line;
             },
+            $orderPeers ?? static fn (array $urls): array => $urls,
         );
     }
 
@@ -183,6 +186,89 @@ final class SyncFetchTest extends TestCase
         $this->assertSame('good bytes', file_get_contents($this->paths->maps() . '/one.sd7'));
         $this->assertSame([], glob($this->paths->partial() . '/sync-*'));
         $this->assertNotEmpty(array_filter($this->log, static fn (string $l) => str_contains($l, 'hash mismatch')));
+    }
+
+    public function test_peer_serving_junk_is_downloaded_from_once_per_run(): void
+    {
+        $a = self::archive('one.sd7', 'good one');
+        $b = self::archive('two.sd7', 'good two');
+        $c = self::archive('three.sd7', 'good three');
+        $this->hold([$a, $b, $c]);
+        $this->peerHas('m2', [$a, $b, $c]);
+        $this->peerHas('m3', [$a, $b, $c]);
+        foreach (['one', 'two', 'three'] as $name) {
+            $this->peerServes('m2', 'maps', "$name.sd7", "junk $name");
+            $this->peerServes('m3', 'maps', "$name.sd7", "good $name");
+        }
+
+        $this->sync()->fetchMissing();
+
+        $fromM2 = array_filter($this->http->downloads, static fn (string $url) => str_starts_with($url, 'https://m2.example/'));
+        $this->assertCount(1, $fromM2);
+        foreach (['one', 'two', 'three'] as $name) {
+            $this->assertSame("good $name", file_get_contents($this->paths->maps() . "/$name.sd7"));
+        }
+    }
+
+    public function test_peer_order_is_chosen_once_per_run(): void
+    {
+        $a = self::archive('one.sd7', 'aaa');
+        $b = self::archive('two.sd7', 'bbb');
+        $this->hold([$a, $b]);
+        $this->peerHas('m2', [$a, $b]);
+        $this->peerHas('m3', [$a, $b]);
+        foreach (['m2', 'm3'] as $id) {
+            $this->peerServes($id, 'maps', 'one.sd7', 'aaa');
+            $this->peerServes($id, 'maps', 'two.sd7', 'bbb');
+        }
+        $calls = [];
+        $reverse = static function (array $urls) use (&$calls): array {
+            $calls[] = $urls;
+            return array_reverse($urls);
+        };
+
+        $this->sync(null, $reverse)->fetchMissing();
+
+        $this->assertSame([['https://m2.example', 'https://m3.example']], $calls);
+        $this->assertSame(['https://m3.example/maps/one.sd7', 'https://m3.example/maps/two.sd7'], $this->http->downloads);
+    }
+
+    public function test_default_peer_order_is_a_shuffle_of_every_peer(): void
+    {
+        $a = self::archive('one.sd7', 'aaa');
+        $this->hold([$a]);
+        $this->peerHas('m2', [$a]);
+        $this->peerHas('m3', [$a]);
+        $sync = new Sync(
+            $this->paths,
+            $this->config,
+            $this->store,
+            $this->http,
+            $this->http,
+            new Deadline(0, static fn (): float => 0.0),
+            static fn (): int => self::NOW,
+            static function (string $line): void {
+            },
+        );
+
+        $sync->fetchMissing();
+
+        // Neither peer serves the file, so both are tried once, in whatever order the shuffle chose.
+        $tried = $this->http->downloads;
+        sort($tried);
+        $this->assertSame(['https://m2.example/maps/one.sd7', 'https://m3.example/maps/one.sd7'], $tried);
+    }
+
+    public function test_removed_filename_in_another_case_is_not_fetched(): void
+    {
+        $a = self::archive('One.sd7', 'abc');
+        $this->hold([$a], [['sha256' => str_repeat('0', 64), 'filename' => 'ONE.SD7', 'reason' => 'withdrawn', 'removed_at' => 1]]);
+        $this->peerHas('m2', [$a]);
+        $this->peerServes('m2', 'maps', 'One.sd7', 'abc');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame([], $this->http->downloads);
     }
 
     public function test_only_wrong_bytes_leaves_nothing_behind(): void

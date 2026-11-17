@@ -25,6 +25,16 @@ final class Lock
         return new self($handle);
     }
 
+    /** Replaces the lock file's contents. Returns false when the write fails. */
+    public function write(string $text): bool
+    {
+        return is_resource($this->handle)
+            && ftruncate($this->handle, 0)
+            && rewind($this->handle)
+            && fwrite($this->handle, $text) === strlen($text)
+            && fflush($this->handle);
+    }
+
     public function release(): void
     {
         if (is_resource($this->handle)) {

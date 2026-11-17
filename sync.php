@@ -40,8 +40,10 @@ try {
         $paths,
         $config,
         new CatalogueStore($paths, $config),
-        new StreamHttpClient(),
-        Deadline::fromIni(),
+        // The hub may redirect. Peers may not, because their URLs point at servers nobody here controls.
+        new StreamHttpClient(followRedirects: true),
+        new StreamHttpClient(followRedirects: false),
+        Deadline::fromIni($config->syncTimeLimit),
         static fn (): int => time(),
         $log,
     );

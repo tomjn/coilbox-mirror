@@ -11,6 +11,7 @@ use Mirror\Crypto;
 use Mirror\Deadline;
 use Mirror\HttpResponse;
 use Mirror\Json;
+use Mirror\Listing;
 use Mirror\Lock;
 use Mirror\Paths;
 use Mirror\Sync;
@@ -28,6 +29,9 @@ final class SyncCatalogueTest extends TestCase
     private FakeHttpClient $http;
     private CatalogueStore $store;
     private Config $config;
+    /** @var array<string, mixed> */
+    private array $configArray;
+    private ?FakeHttpClient $peerHttp = null;
     /** @var list<string> */
     private array $log = [];
     /** @var array{secret: string, public: string} */
@@ -39,13 +43,14 @@ final class SyncCatalogueTest extends TestCase
         $this->http = new FakeHttpClient();
         $this->hubKey = Signer::keypair(1);
         $mirror = Signer::keypair(8);
-        $this->config = Config::fromArray([
+        $this->configArray = [
             'mirror_id' => 'm1',
             'secret_key' => B64::encode($mirror['secret']),
             'hub_url' => self::HUB,
             'hub_keys' => [B64::encode($this->hubKey['public'])],
             'partial_lifetime' => 3600,
-        ]);
+        ];
+        $this->config = Config::fromArray($this->configArray);
         $this->store = new CatalogueStore($this->paths, $this->config);
     }
 
@@ -61,6 +66,7 @@ final class SyncCatalogueTest extends TestCase
             $this->config,
             $this->store,
             $this->http,
+            $this->peerHttp ?? $this->http,
             new Deadline(0, static fn (): float => 0.0),
             static fn (): int => self::NOW,
             function (string $line): void {
@@ -188,6 +194,70 @@ final class SyncCatalogueTest extends TestCase
         $this->assertContains('catalogue from peer:m2 rejected: bad_signature', $this->log);
     }
 
+    /** Pads a catalogue with archives until its JSON is over $bytes long. */
+    private function docOver(int $seq, int $bytes): array
+    {
+        $archives = [];
+        for ($i = 0; strlen(Json::encode($this->doc($seq, [], $archives))) <= $bytes; $i++) {
+            $archives[] = [
+                'filename' => "filler-$i.sd7",
+                'kind' => 'map',
+                'sha256' => hash('sha256', "filler $i"),
+                'size' => 1,
+                'internal_name' => 'x',
+                'version' => '1',
+                'shortname' => null,
+                'author' => null,
+                'description' => null,
+            ];
+        }
+        return $this->doc($seq, [], $archives);
+    }
+
+    public function test_peer_catalogue_over_twice_the_held_size_is_skipped_for_next_peer(): void
+    {
+        $this->hold(5);
+        $heldBytes = filesize($this->paths->catalogueJson());
+        $this->http->on(self::HUB . '/api/v1/catalogue', new HttpResponse(0, ''));
+        $this->servePeer('m2', $this->docOver(6, 2 * $heldBytes));
+        $this->servePeer('m3', $this->doc(6));
+
+        $this->assertSame('peer:m3', $this->sync()->refreshCatalogue());
+        $this->assertSame(6, $this->store->heldSeq());
+        $this->assertContains('catalogue from peer:m2 failed: status 0, no answer or over ' . (2 * $heldBytes) . ' bytes', $this->log);
+    }
+
+    public function test_peer_signature_longer_than_a_signature_is_skipped(): void
+    {
+        $this->hold(5);
+        $this->http->on(self::HUB . '/api/v1/catalogue', new HttpResponse(0, ''));
+        $this->servePeer('m2', $this->doc(6));
+        $this->http->on('https://m2.example/catalogue.sig', new HttpResponse(200, str_repeat('A', 87)));
+        $this->servePeer('m3', $this->doc(6));
+
+        $this->assertSame('peer:m3', $this->sync()->refreshCatalogue());
+        $this->assertContains('catalogue from peer:m2 failed: signature status 0, no answer or over 86 bytes', $this->log);
+    }
+
+    public function test_hub_catalogue_has_no_size_cap(): void
+    {
+        $this->hold(5);
+        $this->serveHub($this->docOver(6, 4 * filesize($this->paths->catalogueJson())));
+        $this->assertSame('hub', $this->sync()->refreshCatalogue());
+    }
+
+    public function test_peers_are_asked_through_the_peer_client(): void
+    {
+        $this->hold(5);
+        $this->peerHttp = new FakeHttpClient();
+        $this->http->on(self::HUB . '/api/v1/catalogue', new HttpResponse(0, ''));
+        $json = Json::encode($this->doc(6));
+        $this->peerHttp->on('https://m2.example/catalogue.json', new HttpResponse(200, $json));
+        $this->peerHttp->on('https://m2.example/catalogue.sig', new HttpResponse(200, Signer::sign(Crypto::CTX_CATALOGUE, $json, $this->hubKey['secret'])));
+
+        $this->assertSame('peer:m2', $this->sync()->refreshCatalogue());
+    }
+
     public function test_removal_deletes_by_hash_and_by_filename_any_case(): void
     {
         $this->put('maps/by_hash.sd7', 'one');
@@ -211,6 +281,18 @@ final class SyncCatalogueTest extends TestCase
         $this->assertFileDoesNotExist($this->paths->partial() . '/sync-' . hash('sha256', 'three'));
     }
 
+    public function test_removals_take_deleted_files_out_of_the_listing(): void
+    {
+        $this->put('maps/gone.sd7', 'one');
+        $this->put('maps/keep.sd7', 'two');
+        Listing::write($this->paths, Listing::build($this->paths, null, self::NOW));
+        $this->hold(5, [['sha256' => hash('sha256', 'one'), 'filename' => 'gone.sd7', 'reason' => 'withdrawn', 'removed_at' => 1]]);
+
+        $this->sync()->applyRemovals();
+
+        $this->assertSame(['keep.sd7'], array_column(Listing::load($this->paths)['files'], 'filename'));
+    }
+
     public function test_files_not_in_catalogue_are_kept(): void
     {
         $this->put('maps/unknown.sd7');
@@ -231,6 +313,91 @@ final class SyncCatalogueTest extends TestCase
         $this->assertSame(['sync-old', 'upload-old'], $deleted);
         $this->assertFileExists($this->paths->partial() . '/sync-fresh');
         $this->assertFileExists($this->paths->partial() . '/.htaccess');
+    }
+
+    public function test_upload_partial_locked_by_an_upload_is_not_deleted(): void
+    {
+        $this->put('.partial/upload-busy', 'x', self::NOW - 7200);
+        $this->put('.partial/upload-idle', 'x', self::NOW - 7200);
+        $busy = fopen($this->paths->partial() . '/upload-busy', 'c+');
+        flock($busy, LOCK_EX);
+        try {
+            $deleted = $this->sync()->cleanPartials();
+        } finally {
+            flock($busy, LOCK_UN);
+            fclose($busy);
+        }
+        $this->assertSame(['upload-idle'], $deleted);
+        $this->assertFileExists($this->paths->partial() . '/upload-busy');
+    }
+
+    public function test_run_records_its_start_time_in_the_lock_file(): void
+    {
+        $this->serveHub($this->doc(5));
+        $this->http->on(self::HUB . '/api/v1/mirrors/report', new HttpResponse(200, '{}'));
+        $this->sync()->run();
+        $this->assertSame((string) self::NOW, file_get_contents($this->paths->state() . '/sync.lock'));
+    }
+
+    private function holdLockStartedAt(int $startedAt): Lock
+    {
+        $lock = Lock::acquire($this->paths->state() . '/sync.lock', false);
+        $this->assertNotNull($lock);
+        $this->assertTrue($lock->write((string) $startedAt));
+        return $lock;
+    }
+
+    public function test_run_held_past_the_time_limit_is_a_failure(): void
+    {
+        $this->config = Config::fromArray(['sync_time_limit' => 3000] + $this->configArray);
+        $lock = $this->holdLockStartedAt(self::NOW - 3001);
+        try {
+            $this->assertSame(1, $this->sync()->run());
+        } finally {
+            $lock->release();
+        }
+        $this->assertSame(['sync has been running for over 3000 seconds'], $this->log);
+        $this->assertFalse(Sync::isRoutine($this->log[0]));
+    }
+
+    public function test_run_held_within_the_time_limit_is_routine(): void
+    {
+        $this->config = Config::fromArray(['sync_time_limit' => 3000] + $this->configArray);
+        $lock = $this->holdLockStartedAt(self::NOW - 3000);
+        try {
+            $this->assertSame(0, $this->sync()->run());
+        } finally {
+            $lock->release();
+        }
+        $this->assertSame(['another sync is running'], $this->log);
+    }
+
+    public function test_held_lock_is_routine_when_no_time_limit_is_set(): void
+    {
+        $lock = $this->holdLockStartedAt(self::NOW - 999999);
+        try {
+            $this->assertSame(0, $this->sync()->run());
+        } finally {
+            $lock->release();
+        }
+        $this->assertSame(['another sync is running'], $this->log);
+    }
+
+    public function test_run_returns_one_when_a_phase_fails(): void
+    {
+        $this->serveHub($this->doc(5));
+        $this->http->on(self::HUB . '/api/v1/mirrors/report', new HttpResponse(200, '{}'));
+        // A folder where disk.lock should be makes every phase that takes the disk lock throw.
+        mkdir($this->paths->state() . '/disk.lock');
+        set_error_handler(static fn(): bool => true);
+        try {
+            $code = $this->sync()->run();
+        } finally {
+            restore_error_handler();
+        }
+        $this->assertSame(1, $code);
+        $this->assertNotEmpty(array_filter($this->log, static fn (string $l) => str_starts_with($l, 'listing rebuild failed')));
+        $this->assertCount(1, $this->http->posts);
     }
 
     public function test_second_run_while_locked_exits_zero_without_work(): void

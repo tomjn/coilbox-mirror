@@ -40,6 +40,14 @@ final class ConfigTest extends TestCase
         $this->assertSame(86400, $config->partialLifetime);
     }
 
+    public function test_sync_time_limit_is_optional_and_defaults_to_no_limit(): void
+    {
+        $this->assertSame(0, Config::fromArray(self::valid())->syncTimeLimit);
+        $a = self::valid();
+        $a['sync_time_limit'] = 3000;
+        $this->assertSame(3000, Config::fromArray($a)->syncTimeLimit);
+    }
+
     public function test_trailing_slash_is_removed_from_hub_url(): void
     {
         $a = self::valid();
@@ -78,6 +86,9 @@ final class ConfigTest extends TestCase
             'partial_lifetime zero' => ['partial_lifetime', 0],
             'partial_lifetime negative' => ['partial_lifetime', -5],
             'partial_lifetime string' => ['partial_lifetime', '86400'],
+            'sync_time_limit negative' => ['sync_time_limit', -1],
+            'sync_time_limit string' => ['sync_time_limit', '3000'],
+            'sync_time_limit float' => ['sync_time_limit', 1.5],
         ];
     }
 

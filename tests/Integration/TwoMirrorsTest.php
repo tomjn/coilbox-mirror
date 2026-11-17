@@ -171,8 +171,9 @@ final class TwoMirrorsTest extends TestCase
             $paths,
             $config,
             new CatalogueStore($paths, $config),
-            new StreamHttpClient(),
-            Deadline::fromIni(),
+            new StreamHttpClient(followRedirects: true),
+            new StreamHttpClient(followRedirects: false),
+            Deadline::fromIni($config->syncTimeLimit),
             static fn (): int => time(),
             function (string $line): void {
                 $this->log[] = $line;
@@ -361,8 +362,9 @@ final class TwoMirrorsTest extends TestCase
             $paths,
             $config,
             $this->store('b'),
-            new StreamHttpClient(),
-            Deadline::fromIni(),
+            new StreamHttpClient(followRedirects: true),
+            new StreamHttpClient(followRedirects: false),
+            Deadline::fromIni($config->syncTimeLimit),
             static fn (): int => time(),
             function (string $line): void {
                 $this->log[] = $line;

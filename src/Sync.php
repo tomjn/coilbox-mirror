@@ -36,47 +36,82 @@ final class Sync
         return false;
     }
 
+    /** @var Closure(list<string>): list<string> */
+    private readonly Closure $orderPeers;
+
     /**
+     * @param HttpClient $http talks to the hub, which is trusted, so it may follow redirects
+     * @param HttpClient $peerHttp talks to peers, and must not follow redirects
      * @param Closure(): int $now returns the current Unix time
      * @param Closure(string): void $log receives one line per event
+     * @param (Closure(list<string>): list<string>)|null $orderPeers puts peer base URLs in the order to try them,
+     *                                                  once per fetch. The default shuffles them.
      */
     public function __construct(
         private readonly Paths $paths,
         private readonly Config $config,
         private readonly CatalogueStore $store,
         private readonly HttpClient $http,
+        private readonly HttpClient $peerHttp,
         private readonly Deadline $deadline,
         private readonly Closure $now,
         private readonly Closure $log,
+        ?Closure $orderPeers = null,
     ) {
+        // A shuffle spreads the load, so every mirror does not ask the first peer in the catalogue first.
+        $this->orderPeers = $orderPeers ?? static function (array $urls): array {
+            shuffle($urls);
+            return $urls;
+        };
     }
 
     /** Returns the exit code. */
     public function run(): int
     {
         $this->paths->ensureState();
-        $lock = Lock::acquire($this->paths->state() . '/sync.lock', false);
+        $lockPath = $this->paths->state() . '/sync.lock';
+        $lock = Lock::acquire($lockPath, false);
         if ($lock === null) {
-            $this->log('another sync is running');
-            return 0;
+            return $this->otherRunHoldsTheLock($lockPath);
         }
 
         try {
-            $this->phase('catalogue refresh', fn () => $this->refreshCatalogue());
-            $this->phase('listing rebuild', fn () => $this->rebuildListing());
-            $this->phase('removals', fn () => $this->applyRemovals());
-            $this->phase('fetch', fn () => $this->fetchMissing());
-            $this->phase('partial cleanup', fn () => $this->cleanPartials());
-            $this->phase('listing rebuild', fn () => $this->rebuildListing());
+            if (!$lock->write((string) ($this->now)())) {
+                $this->log('could not record the start time in sync.lock');
+            }
+            $ok = $this->phase('catalogue refresh', fn () => $this->refreshCatalogue());
+            $ok = $this->phase('listing rebuild', fn () => $this->rebuildListing()) && $ok;
+            $ok = $this->phase('removals', fn () => $this->applyRemovals()) && $ok;
+            $ok = $this->phase('fetch', fn () => $this->fetchMissing()) && $ok;
+            $ok = $this->phase('partial cleanup', fn () => $this->cleanPartials()) && $ok;
+            $ok = $this->phase('listing rebuild', fn () => $this->rebuildListing()) && $ok;
             $reported = $this->report();
 
-            if (!$reported) {
-                return 1;
-            }
-            return $this->store->held() === null ? 1 : 0;
+            return $ok && $reported && $this->store->held() !== null ? 0 : 1;
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Another run holding the lock is routine, unless the operator set sync_time_limit and that run started
+     * longer ago than the limit. Then it is probably stuck on a slow peer, and the operator needs to know.
+     */
+    private function otherRunHoldsTheLock(string $lockPath): int
+    {
+        $limit = $this->config->syncTimeLimit;
+        $started = @file_get_contents($lockPath);
+        if (
+            $limit > 0
+            && is_string($started)
+            && preg_match('/\A[0-9]{1,19}\z/', $started) === 1
+            && ($this->now)() - (int) $started > $limit
+        ) {
+            $this->log("sync has been running for over $limit seconds");
+            return 1;
+        }
+        $this->log('another sync is running');
+        return 0;
     }
 
     /** @return string|null 'hub', 'peer:<id>', or null when nothing new was accepted */
@@ -91,30 +126,58 @@ final class Sync
             return null;
         }
 
+        // Policy: a peer's catalogue may be at most twice the size of the one held, which leaves room for the
+        // catalogue to grow between syncs. Without a cap a peer could send enough to exhaust memory_limit.
+        // The hub fetch above has no cap, because the hub is trusted.
+        clearstatcache(true, $this->paths->catalogueJson());
+        $heldBytes = @filesize($this->paths->catalogueJson());
+        if ($heldBytes === false) {
+            return null;
+        }
+        $jsonCap = 2 * $heldBytes;
+        $sigCap = self::signatureTextBytes();
+
         foreach ($this->store->held()['mirrors'] ?? [] as $peer) {
             if ($peer['id'] === $this->config->mirrorId) {
                 continue;
             }
             $source = 'peer:' . $peer['id'];
-            if ($this->tryFetch($source, $peer['base_url'] . '/catalogue.json', $peer['base_url'] . '/catalogue.sig') === true) {
+            $base = $peer['base_url'];
+            if ($this->tryFetch($source, "$base/catalogue.json", "$base/catalogue.sig", $jsonCap, $sigCap) === true) {
                 return $source;
             }
         }
         return null;
     }
 
+    /** The length of a base64url Ed25519 signature, which is all a catalogue.sig may hold. */
+    private static function signatureTextBytes(): int
+    {
+        return strlen(B64::encode(str_repeat("\0", SODIUM_CRYPTO_SIGN_BYTES)));
+    }
+
+    /**
+     * Returns the hashes and the lowercase filenames on the held catalogue's removal list, as sets.
+     *
+     * @return array{array<string, true>, array<string, true>}
+     */
+    private static function removedSets(?array $held): array
+    {
+        $hashes = [];
+        $names = [];
+        foreach ($held['removed'] ?? [] as $entry) {
+            $hashes[$entry['sha256']] = true;
+            $names[mb_strtolower($entry['filename'])] = true;
+        }
+        return [$hashes, $names];
+    }
+
     /** @return list<string> deleted paths relative to the root */
     public function applyRemovals(): array
     {
-        $removed = $this->store->held()['removed'] ?? [];
-        if ($removed === []) {
+        [$hashes, $names] = self::removedSets($this->store->held());
+        if ($hashes === []) {
             return [];
-        }
-        $hashes = [];
-        $names = [];
-        foreach ($removed as $entry) {
-            $hashes[$entry['sha256']] = true;
-            $names[mb_strtolower($entry['filename'])] = true;
         }
 
         $deleted = [];
@@ -131,6 +194,10 @@ final class Sync
                 } else {
                     $this->log("could not remove $relative");
                 }
+            }
+            // Write the listing now, so listing.json and upload reports stop naming deleted files straight away.
+            if ($deleted !== []) {
+                Listing::write($this->paths, Listing::build($this->paths, $listing, ($this->now)()));
             }
         });
 
@@ -151,10 +218,15 @@ final class Sync
             return;
         }
         $own = Listing::load($this->paths) ?? Listing::build($this->paths, null, ($this->now)());
+        [$removedHashes, $removedNames] = self::removedSets($held);
 
         $missing = [];
         foreach ($held['archives'] as $archive) {
-            if ($this->isOnDisk($own, $archive) || $this->store->isRemoved($archive['sha256'], $archive['filename'])) {
+            if (
+                $this->isOnDisk($own, $archive)
+                || isset($removedHashes[$archive['sha256']])
+                || isset($removedNames[mb_strtolower($archive['filename'])])
+            ) {
                 continue;
             }
             $clash = $this->nameTakenByOtherHash($own, $archive);
@@ -168,13 +240,19 @@ final class Sync
             return;
         }
 
-        $peers = $this->peerListings($held['mirrors'], count($held['archives']));
+        $listings = $this->peerListings($held['mirrors'], count($held['archives']));
+        $peers = [];
+        foreach (($this->orderPeers)(array_keys($listings)) as $baseUrl) {
+            $peers[$baseUrl] = $listings[$baseUrl];
+        }
+        // Peers that served bytes with the wrong hash. They are not asked again until the next run.
+        $badPeers = [];
         foreach ($missing as $archive) {
             if ($this->deadline->expired()) {
                 $this->log('fetch stopped: out of time');
                 return;
             }
-            if (!$this->fetchOne($archive, $peers)) {
+            if (!$this->fetchOne($archive, $peers, $badPeers)) {
                 return;
             }
         }
@@ -190,7 +268,7 @@ final class Sync
             if ($peer['id'] === $this->config->mirrorId) {
                 continue;
             }
-            $response = $this->http->get($peer['base_url'] . '/listing.json', $cap);
+            $response = $this->peerHttp->get($peer['base_url'] . '/listing.json', $cap);
             $doc = $response->status === 200 ? Json::decodeObject($response->body) : null;
             if ($doc === null || !Listing::isValidDoc($doc)) {
                 $this->log('listing from peer:' . $peer['id'] . ' skipped, missing, malformed or over ' . $cap . ' bytes');
@@ -224,20 +302,26 @@ final class Sync
         return null;
     }
 
-    /** @return bool false when the whole fetch should stop */
-    private function fetchOne(array $archive, array $peers): bool
+    /**
+     * @param array<string, true> $badPeers base URLs that served a hash mismatch this run, added to here
+     * @return bool false when the whole fetch should stop
+     */
+    private function fetchOne(array $archive, array $peers, array &$badPeers): bool
     {
         $folder = $archive['kind'] === 'map' ? 'maps' : 'games';
         $partial = $this->paths->partial() . '/sync-' . $archive['sha256'];
 
         foreach ($peers as $baseUrl => $listing) {
+            if (isset($badPeers[$baseUrl])) {
+                continue;
+            }
             $entry = Listing::find($listing, $archive['kind'], $archive['filename']);
             if ($entry === null || $entry['sha256'] !== $archive['sha256'] || $entry['size'] !== $archive['size']) {
                 continue;
             }
 
             $url = "$baseUrl/$folder/" . rawurlencode($archive['filename']);
-            $result = $this->http->download($url, $partial, $archive['size'], $this->deadline);
+            $result = $this->peerHttp->download($url, $partial, $archive['size'], $this->deadline);
             if ($result === DownloadResult::Stopped) {
                 $this->log("download of $folder/{$archive['filename']} stopped: out of time");
                 return false;
@@ -251,7 +335,8 @@ final class Sync
             $actual = $this->deadline->step(static fn (): string|false => @hash_file('sha256', $partial));
             if (!is_string($actual) || !hash_equals($archive['sha256'], $actual)) {
                 @unlink($partial);
-                $this->log("hash mismatch for $folder/{$archive['filename']} from $baseUrl");
+                $badPeers[$baseUrl] = true;
+                $this->log("hash mismatch for $folder/{$archive['filename']} from $baseUrl, not asking it again this run");
                 continue;
             }
 
@@ -314,12 +399,34 @@ final class Sync
             }
             clearstatcache(true, $path);
             $mtime = filemtime($path);
-            if ($mtime !== false && $mtime < $cutoff && @unlink($path)) {
+            if ($mtime !== false && $mtime < $cutoff && $this->deletePartial($name, $path)) {
                 $deleted[] = $name;
                 $this->log("removed .partial/$name");
             }
         }
         return $deleted;
+    }
+
+    /**
+     * Deletes one partial. An upload partial is deleted only while holding its lock, so a slow upload that
+     * still holds it is left alone. Sync partials need no lock, because only the run holding sync.lock uses them.
+     */
+    private function deletePartial(string $name, string $path): bool
+    {
+        if (!str_starts_with($name, 'upload-')) {
+            return @unlink($path);
+        }
+        $handle = @fopen($path, 'r');
+        if ($handle === false) {
+            return false;
+        }
+        try {
+            // The upload handler checks the file is still on disk after it takes the lock, so deleting while
+            // holding the lock is safe for a request that is waiting on it.
+            return flock($handle, LOCK_EX | LOCK_NB) && @unlink($path);
+        } finally {
+            fclose($handle);
+        }
     }
 
     public function report(): bool
@@ -339,17 +446,22 @@ final class Sync
         return $ok;
     }
 
-    /** @return true|string|false true when accepted, the rejection reason when rejected, false when the fetch failed */
-    private function tryFetch(string $source, string $jsonUrl, string $sigUrl): bool|string
+    /**
+     * Fetches from the hub when no caps are given, and from a peer, through the peer client, when they are.
+     *
+     * @return true|string|false true when accepted, the rejection reason when rejected, false when the fetch failed
+     */
+    private function tryFetch(string $source, string $jsonUrl, string $sigUrl, ?int $jsonCap = null, ?int $sigCap = null): bool|string
     {
-        $json = $this->http->get($jsonUrl);
+        $client = $jsonCap === null ? $this->http : $this->peerHttp;
+        $json = $client->get($jsonUrl, $jsonCap);
         if ($json->status !== 200) {
-            $this->log("catalogue from $source failed: status {$json->status}");
+            $this->log("catalogue from $source failed: status {$json->status}" . self::capNote($json, $jsonCap));
             return false;
         }
-        $sig = $this->http->get($sigUrl);
+        $sig = $client->get($sigUrl, $sigCap);
         if ($sig->status !== 200) {
-            $this->log("catalogue from $source failed: signature status {$sig->status}");
+            $this->log("catalogue from $source failed: signature status {$sig->status}" . self::capNote($sig, $sigCap));
             return false;
         }
         try {
@@ -360,6 +472,12 @@ final class Sync
         }
         $this->log("catalogue accepted from $source");
         return true;
+    }
+
+    /** Status 0 from a capped fetch can mean the body was too long, so say so. */
+    private static function capNote(HttpResponse $response, ?int $cap): string
+    {
+        return $response->status === 0 && $cap !== null ? ", no answer or over $cap bytes" : '';
     }
 
     private function rebuildListing(): void
@@ -382,12 +500,15 @@ final class Sync
         }
     }
 
-    private function phase(string $name, Closure $fn): void
+    /** Returns false when the phase threw. */
+    private function phase(string $name, Closure $fn): bool
     {
         try {
             $fn();
+            return true;
         } catch (\Throwable $e) {
             $this->log("$name failed: " . $e->getMessage());
+            return false;
         }
     }
 
