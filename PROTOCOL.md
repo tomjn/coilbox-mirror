@@ -451,6 +451,10 @@ The mirror treats any 2xx status as success and ignores the body. Any other stat
 
 A mirror whose sync has stalled sends no sync reports. Its operator can set `sync_time_limit` in the mirror config, the longest a cron run may take in seconds. With it set, a run stops fetching before the limit, and a later run that finds an older one still going past the limit tells the operator. A mirror that has stopped reporting is worth raising with its operator.
 
+### Completing an upload whose report failed
+
+An upload report can fail, and the mirror does not retry it. The next sync report carries the file instead, but a sync report has `upload` set to `null`, so the upload id is lost. The hub therefore links reports to uploads by hash. When any verified report from a mirror, of either event, has a `held` list containing the `sha256` of an archive the hub still has in the uploading state for that mirror, the hub marks that archive as listed on that mirror.
+
 The report format has no replay protection beyond `sent_at`. If the hub wants to refuse stale reports, it decides how.
 
 Fixtures: `fixtures/report-sync.json` and `fixtures/report-upload.json`. Both are request bodies. Both are signed by the mirror key and report the first catalogue. The listing holds one file that catalogue does not list, so each report has one `unknown` entry.

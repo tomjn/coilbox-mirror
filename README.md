@@ -71,9 +71,21 @@ This README covers installing a mirror on ordinary shared hosting and keeping it
 
    The first command checks PHP, the extensions, the settings and the folders. The second command also requests your mirror over HTTP to check what the web server exposes. It tries to download `private/canary.txt`, a file that must never be downloadable, so a successful download shows the private folder is exposed.
 
-   Each problem prints on its own line starting with `problem:`, and the command exits with status 1. When everything passes, it prints `ok` and the upload chunk size. Fix every problem before you go on. Use `--root=<folder>` to check a folder other than the one the script sits in. Use `--probe-file=maps/<name>` together with `--url` to test downloading a file you already hold.
+   Each problem prints on its own line starting with `problem:`, and the command exits with status 1. When everything passes, it prints `ok` and the upload chunk size. Fix every problem before you go on.
+
+   The check also prints `no catalogue held` until the first sync succeeds. That is normal on a new mirror and is not a problem. Use `--root=<folder>` to check a folder other than the one the script sits in. Use `--probe-file=maps/<name>` together with `--url` to test downloading a file you already hold.
 
 ## Add the cron job
+
+Before you add the job, run one sync by hand, as the same user cron will use.
+
+```
+php sync.php --verbose
+```
+
+It prints each step. The first run fetches the catalogue, so `no catalogue held` should go away. Fix anything it reports as failed before you rely on cron, because cron only emails you about problems.
+
+Cron and the web server must run as the same user, or both must be able to write to `private/state/`. The mirror creates that folder with mode 0700, so only the user that created it can write to it. If your host runs them as different users, change the folder's group and permissions yourself.
 
 The mirror syncs with the hub and other mirrors when cron runs `sync.php`. Add an hourly job.
 
@@ -82,6 +94,8 @@ The mirror syncs with the hub and other mirrors when cron runs `sync.php`. Add a
 ```
 
 Use the full path to a PHP binary that is 8.4 or later, and the full path to `sync.php`. Any interval is safe. If a run is still going when the next one starts, the new run stops straight away.
+
+Command-line PHP usually has no time limit, so a peer that sends data very slowly could hold up a run for good, and every later run would stop straight away without telling you. To guard against this, set `sync_time_limit` in `private/config.php` to the longest a run may take, in seconds. Pick a value shorter than your cron interval, such as 3000 for an hourly job. A run then stops fetching before the limit. If a later run finds an older one still going past the limit, it prints `sync has been running for over N seconds`, so cron emails you. The default of 0 means no limit.
 
 The plain `php` on a shared host can be older than the version you chose for the website. On DreamHost, plain `php` was 8.2 while the site ran 8.5, and the 8.5 binary was `/usr/local/php85/bin/php`. Run `php -v` to see what plain `php` is, and ask your host where the other versions live.
 
@@ -108,6 +122,8 @@ php sync.php --verbose
 ```
 
 To see how fresh the mirror's copy of the catalogue is, run `php bin/check.php`. It prints the catalogue sequence number and the time the hub generated it.
+
+The mirror keeps the sequence number of the catalogue it holds in `private/state/catalogue_seq`, so nobody can swap in an older catalogue through the web folder. If a run reports that `catalogue_seq` is damaged, or missing while `catalogue.json` cannot be read, the mirror refuses every new catalogue until you fix it. Delete `private/state/catalogue_seq`, `catalogue.json` and `catalogue.sig`, then run `php sync.php --verbose` to fetch a fresh catalogue.
 
 The mirror adds a new hub key by itself when the hub publishes one in a signed catalogue. If a mirror missed that and stops accepting catalogues, add the key by hand. Open `private/config.php`, add the new public key as another line in `hub_keys`, keep the old keys, and run `php sync.php --verbose` to confirm. The hub operator tells you when this is needed.
 
