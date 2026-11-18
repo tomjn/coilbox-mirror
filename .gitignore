@@ -11,3 +11,4 @@ games/*
 /catalogue.sig
 /listing.json
 .phpunit.cache/
+/listing-header.html

@@ -6,6 +6,13 @@ RemoveType .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc .cgi
 Options +Indexes
 DirectoryIndex disabled
 
+# Styles the listing like the hub. The paths are relative, so they also work when the mirror sits in a subfolder.
+# Apache adds the header only when ../listing-header.html exists. Copy it from listing-header.sample.html.
+IndexOptions FancyIndexing HTMLTable SuppressIcon SuppressDescription Charset=UTF-8
+IndexStyleSheet ../listing.css
+IndexHeadInsert "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+HeaderName ../listing-header.html
+
 # This overrides the root deny, so a valid archive name like x.php.sd7 still downloads.
 <FilesMatch "\.(?i:sd7|sdz)$">
   Require all granted
