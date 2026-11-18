@@ -140,7 +140,7 @@ cp listing-header.sample.html listing-header.html
 
 Without `listing-header.html` the pages still list the files and keep the hub's colours, but have no heading. Updating the mirror leaves your copy alone, because only the sample ships with it.
 
-On Apache the listing style needs `.htaccess` files to be allowed to set `Indexes` options. If `maps/` answers 500 after an update, your host does not allow that. Ask them to, or delete the four `Index` and `HeaderName` lines from `maps/.htaccess` and `games/.htaccess`.
+On Apache the listing style needs the host to let `.htaccess` files set `Indexes` options. DreamHost does. On a host that does not, `maps/` answers 500 and `php bin/check.php --url=...` says so. To fall back to a plain listing, delete the lines under the `Listing style` comment in `maps/.htaccess` and `games/.htaccess`.
 
 ## What the mirror serves
 

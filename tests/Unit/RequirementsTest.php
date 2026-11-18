@@ -212,6 +212,15 @@ final class RequirementsTest extends TestCase
         $this->assertStringContainsString('maps/', implode("\n", Requirements::remote($http, self::BASE)));
     }
 
+    public function test_remote_explains_a_500_on_maps_as_the_listing_style(): void
+    {
+        $http = $this->cleanRemote();
+        $http->on(self::BASE . '/maps/', new HttpResponse(500, ''));
+        $problems = implode("\n", Requirements::remote($http, self::BASE));
+        $this->assertStringContainsString('maps/ answered 500', $problems);
+        $this->assertStringContainsString('Listing style', $problems);
+    }
+
     public function test_remote_flags_sync_php_that_is_not_forbidden(): void
     {
         $http = $this->cleanRemote();
