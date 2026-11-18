@@ -4,13 +4,23 @@ A mirror stores Recoil map and game archives and serves them over plain HTTP. Pl
 
 The hub is a separate website. It keeps a signed catalogue of every archive and every mirror. Each mirror stores a copy of that catalogue and checks its signature with the hub's public keys. A mirror also copies files from the other mirrors listed in the catalogue, so mirrors keep syncing with each other if the hub goes away.
 
-This README covers installing a mirror on ordinary shared hosting and keeping it running. `PROTOCOL.md` describes the formats and HTTP interfaces in detail.
+This README covers installing a mirror on ordinary shared hosting or on your own server with nginx, and keeping it running. `PROTOCOL.md` describes the formats and HTTP interfaces in detail.
+
+## Run a mirror
+
+Anyone can offer a mirror. The hub only sends players and uploads to mirrors it lists, so the hub operator has to add yours.
+
+1. Open an issue on [tomjn/coilbox-mirror](https://github.com/tomjn/coilbox-mirror/issues) to ask for a mirror ID. Say where the mirror will live and roughly how much disk space you can give it.
+2. Install the mirror, either on [shared hosting with Apache](#set-up-on-shared-hosting) or [on nginx](#set-up-on-nginx).
+3. Send the hub operator your public key, mirror ID and base URL, and add the hub's public key to your config.
+4. Run the checks, then [add the cron job](#add-the-cron-job) that keeps the mirror in sync.
+5. [Put your name on the listing pages](#put-your-name-on-the-listing-pages).
 
 ## What you need
 
 - PHP 8.4 or later, with the extensions `sodium`, `hash`, `json`, `openssl` and `mbstring`
 - The PHP settings `allow_url_fopen` and `file_uploads` turned on
-- Apache 2.4, with `.htaccess` files allowed
+- Apache 2.4 with `.htaccess` files allowed, or nginx with PHP-FPM
 - Shell access, so you can run PHP from the command line and add a cron job
 - A domain or subdomain for the mirror
 - Disk space for the archives
@@ -26,6 +36,8 @@ This README covers installing a mirror on ordinary shared hosting and keeping it
    Upload these:
 
    - `.htaccess`
+   - `listing.css`
+   - `listing-header.sample.html`
    - `upload.php`
    - `limits.php`
    - `sync.php`
@@ -75,6 +87,21 @@ This README covers installing a mirror on ordinary shared hosting and keeping it
 
    The check also prints `no catalogue held` until the first sync succeeds. That is normal on a new mirror and is not a problem. Use `--root=<folder>` to check a folder other than the one the script sits in. Use `--probe-file=maps/<name>` together with `--url` to test downloading a file you already hold.
 
+## Set up on nginx
+
+nginx ignores the `.htaccess` files, so its site config has to do the same job. `examples/nginx.conf` is a complete site that does.
+
+1. Follow steps 1 to 7 of the shared hosting setup above. The `.htaccess` files can stay. nginx does not read them.
+2. Copy `examples/nginx.conf` to `/etc/nginx/sites-available/` and link it into `sites-enabled`.
+3. Change `server_name`, `root`, the certificate paths and the `fastcgi_pass` socket to match your server. The comment at the top of the file lists them.
+4. Set `client_max_body_size` to at least PHP-FPM's `post_max_size`. If it is lower, nginx refuses upload chunks that the mirror told uploaders it would accept.
+5. Run `sudo nginx -t`, then `sudo systemctl reload nginx`.
+6. Run both checks from step 8 of the shared hosting setup. `--url` tests the nginx rules the same way it tests the `.htaccess` ones.
+
+The listing header uses nginx's `sub` and `ssi` modules. The packages from nginx.org and the `nginx` package on Debian and Ubuntu include both. If `nginx -t` reports an unknown `sub_filter` directive, delete the four `sub_filter` and `ssi` lines and the listings stay plain.
+
+PHP-FPM must run as the same user as cron, or both must be able to write to `private/state/`, as described in the next section.
+
 ## Add the cron job
 
 Before you add the job, run one sync by hand, as the same user cron will use.
@@ -100,6 +127,20 @@ Command-line PHP usually has no time limit, so a peer that sends data very slowl
 The plain `php` on a shared host can be older than the version you chose for the website. On DreamHost, plain `php` was 8.2 while the site ran 8.5, and the 8.5 binary was `/usr/local/php85/bin/php`. Run `php -v` to see what plain `php` is, and ask your host where the other versions live.
 
 DreamHost users can add the job in the panel's cron section. Enter the same command.
+
+## Put your name on the listing pages
+
+The `maps/` and `games/` pages list every archive. They carry the Coilbox Hub heading, a link back to the hub and a line thanking you for hosting the mirror.
+
+Copy `listing-header.sample.html` to `listing-header.html`, then put your name and link in the line that starts `Thanks to`.
+
+```
+cp listing-header.sample.html listing-header.html
+```
+
+Without `listing-header.html` the pages still list the files and keep the hub's colours, but have no heading. Updating the mirror leaves your copy alone, because only the sample ships with it.
+
+On Apache the listing style needs `.htaccess` files to be allowed to set `Indexes` options. If `maps/` answers 500 after an update, your host does not allow that. Ask them to, or delete the four `Index` and `HeaderName` lines from `maps/.htaccess` and `games/.htaccess`.
 
 ## What the mirror serves
 
