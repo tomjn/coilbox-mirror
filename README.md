@@ -50,7 +50,7 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
 
    Keep these off the server: `vendor/`, `tests/`, `fixtures/`, `composer.json`, `composer.lock`, `phpunit.xml.dist` and `.git`. `PROTOCOL.md` and this README are optional.
 
-   If you prefer `git clone`, clone into a folder outside the web folder. Then copy the files listed above into the web folder. A clone inside the web folder would also expose `tests/` and the other files you should keep off the server.
+   You can also `git clone` straight into the web folder. The root `.htaccess` hides `tests/`, `fixtures/`, `examples/` and `vendor/`, which only exist in a clone, and the nginx example refuses them too. Step 8's `--url` check confirms they stay hidden. Your `private/config.php`, `listing-header.html` and archives are ignored by git, so `git pull` leaves them alone.
 
 3. Copy `private/config.sample.php` to `private/config.php`.
 

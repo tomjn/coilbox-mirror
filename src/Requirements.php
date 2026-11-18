@@ -13,8 +13,9 @@ final class Requirements
      * Paths that must not be served. A 403 or a 404 are both fine.
      * private/canary.txt is a real file, so it shows the private folder's files are blocked.
      * A directory URL like .partial/ only shows that the folder is not listed.
+     * fixtures/ and examples/ only exist when the mirror is a git clone, and are then readable unless blocked.
      */
-    private const HIDDEN = ['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'];
+    private const HIDDEN = ['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD', 'fixtures/keys.json', 'examples/nginx.conf'];
 
     /**
      * Checks the PHP version, extensions, ini settings, config and writable folders.

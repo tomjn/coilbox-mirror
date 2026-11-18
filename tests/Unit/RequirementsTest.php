@@ -64,7 +64,7 @@ final class RequirementsTest extends TestCase
     private function cleanRemote(): FakeHttpClient
     {
         $http = new FakeHttpClient();
-        foreach (['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD'] as $i => $path) {
+        foreach (['private/config.php', 'private/canary.txt', '.partial/', 'src/Config.php', 'bin/keygen.php', 'composer.json', '.git/HEAD', 'fixtures/keys.json', 'examples/nginx.conf'] as $i => $path) {
             $http->on(self::BASE . '/' . $path, new HttpResponse($i % 2 === 0 ? 403 : 404, ''));
         }
         $http->on(self::BASE . '/maps/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /maps</body></html>'));
@@ -178,6 +178,15 @@ final class RequirementsTest extends TestCase
         $problems = Requirements::remote($http, self::BASE);
         $this->assertCount(1, $problems);
         $this->assertStringContainsString('private/config.php', $problems[0]);
+    }
+
+    public function test_remote_flags_repo_only_folders_left_readable_by_a_git_clone(): void
+    {
+        foreach (['fixtures/keys.json', 'examples/nginx.conf'] as $path) {
+            $http = $this->cleanRemote();
+            $http->on(self::BASE . '/' . $path, new HttpResponse(200, '{}'));
+            $this->assertStringContainsString($path, implode("\n", Requirements::remote($http, self::BASE)));
+        }
     }
 
     public function test_remote_flags_a_downloadable_canary_file(): void
