@@ -125,4 +125,12 @@ final class ReportTest extends TestCase
         $http->on($url, new HttpResponse(0, ''));
         $this->assertFalse(Report::send($http, $this->config(), '{"a":1}'));
     }
+
+    public function test_unknown_mirror_is_the_hub_403_for_a_mirror_it_does_not_know(): void
+    {
+        $this->assertTrue(Report::unknownMirror(new HttpResponse(403, '{"error":"unknown_mirror"}')));
+        $this->assertFalse(Report::unknownMirror(new HttpResponse(403, '{"error":"bad_signature"}')));
+        $this->assertFalse(Report::unknownMirror(new HttpResponse(403, 'not json')));
+        $this->assertFalse(Report::unknownMirror(new HttpResponse(200, '{"error":"unknown_mirror"}')));
+    }
 }

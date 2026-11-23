@@ -435,11 +435,16 @@ final class Sync
             $now = ($this->now)();
             $listing = Listing::load($this->paths) ?? Listing::build($this->paths, null, $now);
             $payload = Report::payload($this->config, $this->store->held(), $listing, 'sync', null, $now);
-            $ok = Report::send($this->http, $this->config, Report::body($payload, $this->config->secretKey));
+            $response = Report::post($this->http, $this->config, Report::body($payload, $this->config->secretKey));
         } catch (\Throwable $e) {
             $this->log('sync report failed: ' . $e->getMessage());
             return false;
         }
+        if (Report::unknownMirror($response)) {
+            $this->log('sync report failed: not approved by the hub yet');
+            return false;
+        }
+        $ok = Report::accepted($response);
         if (!$ok) {
             $this->log('sync report failed: the hub did not answer with a 2xx status');
         }

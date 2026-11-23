@@ -112,6 +112,14 @@ final class Requirements
             $problems[] = 'upload.php answered ' . self::describe($upload->status) . self::reason($upload->body) . '. Without a token it must answer 400 with the error bad_request, which shows PHP runs.';
         }
 
+        // 404 means the mirror has no base_url yet, which bin/check.php's local checks do not count as a fault.
+        $identity = $h->get("$base/identity.php");
+        $identityBody = Json::decodeObject($identity->body);
+        if (!($identity->status === 200 && is_string($identityBody['mirror_id'] ?? null))
+            && !($identity->status === 404 && ($identityBody['error'] ?? null) === 'not_set_up')) {
+            $problems[] = 'identity.php answered ' . self::describe($identity->status) . self::reason($identity->body) . '. It must answer 200 with the mirror ID, or 404 before setup.';
+        }
+
         if ($probeFile !== null) {
             $file = $h->get("$base/" . ltrim($probeFile, '/'));
             $type = strtolower(trim(explode(';', $file->headers['content-type'] ?? '')[0]));
@@ -121,6 +129,26 @@ final class Requirements
         }
 
         return $problems;
+    }
+
+    /**
+     * Fetches the hub's published key and names the problem when this mirror does not trust it,
+     * or null when it does.
+     *
+     * @param list<string> $trusted raw public keys, from the config and those learned from catalogues
+     */
+    public static function hubKeyProblem(HttpClient $h, string $hubUrl, array $trusted): ?string
+    {
+        $answer = $h->get($hubUrl . '/api/v1/mirrors/hub-key');
+        $published = $answer->status === 200 ? (Json::decodeObject($answer->body)['public_key'] ?? null) : null;
+        $raw = is_string($published) ? B64::decode($published) : null;
+        if ($raw === null || strlen($raw) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+            return "The hub's published key could not be read from $hubUrl/api/v1/mirrors/hub-key (answered " . self::describe($answer->status) . '). Check hub_url.';
+        }
+        if (!in_array($raw, $trusted, true)) {
+            return "The hub's published key $published is not in hub_keys, so this mirror will refuse the hub's catalogue. Check hub_url, then add the key to hub_keys if the hub operator confirms it.";
+        }
+        return null;
     }
 
     private static function on(string $value): bool

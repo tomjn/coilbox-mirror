@@ -17,6 +17,8 @@ final class Config
         public readonly array $hubKeys,
         public readonly int $partialLifetime,
         public readonly int $syncTimeLimit,
+        public readonly ?string $baseUrl = null,
+        public readonly ?string $mirrorName = null,
     ) {
     }
 
@@ -75,6 +77,16 @@ final class Config
             throw new ConfigError('sync_time_limit must be an integer of 0 or more, in seconds. 0 means no limit.');
         }
 
+        // Optional, so configs written before setup.php keep loading. identity.php and bin/register.php need them.
+        $baseUrl = $a['base_url'] ?? null;
+        if ($baseUrl !== null && (!is_string($baseUrl) || !self::validBaseUrl($baseUrl))) {
+            throw new ConfigError('base_url must be the https:// address of this mirror, with no user name, password, query or # part.');
+        }
+        $mirrorName = $a['mirror_name'] ?? null;
+        if ($mirrorName !== null && (!is_string($mirrorName) || !self::validName($mirrorName))) {
+            throw new ConfigError('mirror_name must be 1 to 128 characters with no control characters.');
+        }
+
         return new self(
             $mirrorId,
             $secret,
@@ -83,7 +95,33 @@ final class Config
             $hubKeys,
             $lifetime,
             $syncTimeLimit,
+            $baseUrl === null ? null : rtrim($baseUrl, '/'),
+            $mirrorName,
         );
+    }
+
+    /** An https address with a host and no user, password, query, fragment or whitespace. */
+    public static function validBaseUrl(string $url): bool
+    {
+        if (preg_match('/\s/', $url) === 1 || str_contains($url, '?') || str_contains($url, '#')) {
+            return false;
+        }
+        $parts = parse_url($url);
+        return is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && ($parts['host'] ?? '') !== ''
+            && !isset($parts['user'])
+            && !isset($parts['pass']);
+    }
+
+    /** 1 to 128 characters of valid UTF-8 with no control, format or line separator characters. */
+    public static function validName(string $name): bool
+    {
+        if (!mb_check_encoding($name, 'UTF-8')) {
+            return false;
+        }
+        $length = mb_strlen($name, 'UTF-8');
+        return $length >= 1 && $length <= 128 && preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', $name) !== 1;
     }
 
     private static function validHubUrl(string $url): bool

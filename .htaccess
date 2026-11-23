@@ -1,4 +1,4 @@
-# Coilbox mirror - static file archive plus two PHP entry points, upload.php and limits.php.
+# Coilbox mirror - static file archive plus four PHP entry points: upload.php, limits.php, identity.php and setup.php.
 # Nothing else here is ever executed. Needs Apache 2.4.
 
 # ---------------------------------------------------------------
@@ -23,15 +23,15 @@ RedirectMatch 404 /\.(git|partial)(/|$)
 # Folders that only exist in a git clone. Nothing in them belongs on the web.
 RedirectMatch 404 /(tests|fixtures|examples|vendor)(/|$)
 
-# The two public entry points. This comes after the denies because a later
+# The public entry points. This comes after the denies because a later
 # section overrides an earlier one. A FilesMatch on the name alone would also
 # apply in every subfolder, so the grant checks the full path. It assumes the
 # mirror sits at the domain root. A subfolder install must put its prefix
-# in the expression, for example m#^/mirror/(upload|limits)\.php$#.
+# in the expression, for example m#^/mirror/(upload|limits|identity|setup)\.php$#.
 # Hosts that run PHP through mod_fcgid, such as DreamHost, refuse to run it
 # without ExecCGI, which the rest of the site turns off below.
-<FilesMatch "^(upload|limits)\.php$">
-  Require expr "%{REQUEST_URI} =~ m#^/(upload|limits)\.php$#"
+<FilesMatch "^(upload|limits|identity|setup)\.php$">
+  Require expr "%{REQUEST_URI} =~ m#^/(upload|limits|identity|setup)\.php$#"
   Options +ExecCGI
 </FilesMatch>
 
@@ -45,7 +45,7 @@ RemoveHandler .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
 RemoveType .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc
 RemoveHandler .cgi .pl .py .sh .shtml
 
-# No CGI or server-side includes, except ExecCGI for the two entry points above.
+# No CGI or server-side includes, except ExecCGI for the entry points above.
 Options -ExecCGI -Includes -Indexes -FollowSymLinks +SymLinksIfOwnerMatch
 
 # ---------------------------------------------------------------

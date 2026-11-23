@@ -10,9 +10,9 @@ This README covers installing a mirror on ordinary shared hosting or on your own
 
 Anyone can offer a mirror. The hub only sends players and uploads to mirrors it lists, so the hub operator has to add yours.
 
-1. Open an issue on [tomjn/coilbox-mirror](https://github.com/tomjn/coilbox-mirror/issues) to ask for a mirror ID. Say where the mirror will live and roughly how much disk space you can give it.
-2. Install the mirror, either on [shared hosting with Apache](#set-up-on-shared-hosting) or [on nginx](#set-up-on-nginx).
-3. Send the hub operator your public key, mirror ID and base URL, and add the hub's public key to your config.
+1. Install the mirror, either on [shared hosting with Apache](#set-up-on-shared-hosting) or [on nginx](#set-up-on-nginx).
+2. Open `setup.php` in your browser. It writes the config, makes the mirror's key and gives you a link.
+3. Open the link while signed in to the hub and send the request. A hub moderator approves it.
 4. Run the checks, then [add the cron job](#add-the-cron-job) that keeps the mirror in sync.
 5. [Put your name on the listing pages](#put-your-name-on-the-listing-pages).
 
@@ -22,6 +22,7 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
 - The PHP settings `allow_url_fopen` and `file_uploads` turned on
 - Apache 2.4 with `.htaccess` files allowed, or nginx with PHP-FPM
 - Shell access, so you can run PHP from the command line and add a cron job
+- An account on the hub, to ask for the mirror to be added
 - A domain or subdomain for the mirror
 - Disk space for the archives
 
@@ -29,7 +30,7 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
 
 1. Point a domain or subdomain at an empty folder on the server.
 
-   Give the mirror its own domain or subdomain. The `.htaccess` file in the root folder only lets visitors reach `upload.php` and `limits.php` at the top of the domain. To install in a subfolder instead, edit the `m#...#` pattern near the end of the first section of the root `.htaccess`, as its comment explains.
+   Give the mirror its own domain or subdomain. The `.htaccess` file in the root folder only lets visitors reach `upload.php`, `limits.php`, `identity.php` and `setup.php` at the top of the domain. To install in a subfolder instead, edit the `m#...#` pattern near the end of the first section of the root `.htaccess`, as its comment explains.
 
 2. Put the deployable files in that folder.
 
@@ -40,6 +41,8 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
    - `listing-header.sample.html`
    - `upload.php`
    - `limits.php`
+   - `identity.php`
+   - `setup.php`
    - `sync.php`
    - `src/`
    - `bin/`
@@ -52,36 +55,26 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
 
    You can also `git clone` straight into the web folder. The root `.htaccess` hides `tests/`, `fixtures/`, `examples/` and `vendor/`, which only exist in a clone, and the nginx example refuses them too. Step 8's `--url` check confirms they stay hidden. Your `private/config.php`, `listing-header.html` and archives are ignored by git, so `git pull` leaves them alone.
 
-3. Copy `private/config.sample.php` to `private/config.php`.
+3. Open `https://<your mirror>/setup.php` in a browser, straight after uploading the files.
 
-   ```
-   cp private/config.sample.php private/config.php
-   ```
+   Fill in an ID, a name players see and the mirror's address. The address starts filled in from the page you opened. The page writes `private/config.php`, makes the mirror's signing key and trusts the key of the hub at `hub.coilbox.org`. The secret key stays on the server and is never shown.
 
-4. Set `mirror_id` in `private/config.php`.
+   Setup works once. Anyone who opens the page first sets the mirror up, so open it straight away. If the page says the mirror is already set up and you did not do it, delete `private/config.php` and open the page again.
 
-   The hub operator gives you the ID. It is a short name of lowercase letters, digits and hyphens.
+   If the page says it cannot write to `private`, let the web server write to that folder and reload, or [set the mirror up by hand](#set-up-by-hand).
 
-5. Make the mirror's signing key.
+4. Ask the hub to add the mirror.
 
-   ```
-   php bin/keygen.php
-   ```
+   The setup page shows a link to the hub. Open it while signed in to the hub, check the details and send the request. The hub asks your mirror to prove it holds its key, then a moderator reviews the request. `php bin/register.php` prints the same link again.
 
-   The script prints a `secret_key` line and a public key. Paste the `secret_key` line into `private/config.php`. Keep it secret. The script writes no files.
-
-6. Send the hub operator three things: the public key from step 5, your mirror ID and the mirror's base URL, such as `https://mirror.example.org`.
-
-7. Replace the `PASTE_THE_HUB_PUBLIC_KEY_HERE` entry in `hub_keys` with the hub public key the operator gives you. Check that `hub_url` is correct.
-
-8. Check the setup.
+5. Check the setup.
 
    ```
    php bin/check.php
    php bin/check.php --url=https://mirror.example.org
    ```
 
-   The first command checks PHP, the extensions, the settings and the folders. The second command also requests your mirror over HTTP to check what the web server exposes. It tries to download `private/canary.txt`, a file that must never be downloadable, so a successful download shows the private folder is exposed.
+   The first command checks PHP, the extensions, the settings and the folders. The second command also requests your mirror over HTTP to check what the web server exposes, and checks that the key the hub publishes is one the mirror trusts. It tries to download `private/canary.txt`, a file that must never be downloadable, so a successful download shows the private folder is exposed.
 
    Each problem prints on its own line starting with `problem:`, and the command exits with status 1. When everything passes, it prints `ok` and the upload chunk size. Fix every problem before you go on.
 
@@ -91,16 +84,16 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
 
 nginx ignores the `.htaccess` files, so its site config has to do the same job. `examples/nginx.conf` is a complete site that does.
 
-1. Follow steps 1 to 7 of the shared hosting setup above. The `.htaccess` files can stay. nginx does not read them.
+1. Follow steps 1 and 2 of the shared hosting setup above. The `.htaccess` files can stay. nginx does not read them.
 2. Copy `examples/nginx.conf` to `/etc/nginx/sites-available/` and link it into `sites-enabled`.
 3. Change `server_name`, `root`, the certificate paths and the `fastcgi_pass` socket to match your server. The comment at the top of the file lists them.
 4. Set `client_max_body_size` to at least PHP-FPM's `post_max_size`. If it is lower, nginx refuses upload chunks that the mirror told uploaders it would accept.
 5. Run `sudo nginx -t`, then `sudo systemctl reload nginx`.
-6. Run both checks from step 8 of the shared hosting setup. `--url` tests the nginx rules the same way it tests the `.htaccess` ones.
+6. Do steps 3 to 5 of the shared hosting setup. `--url` tests the nginx rules the same way it tests the `.htaccess` ones.
 
 The listing header uses nginx's `sub` and `ssi` modules. The packages from nginx.org and the `nginx` package on Debian and Ubuntu include both. If `nginx -t` reports an unknown `sub_filter` directive, delete the four `sub_filter` and `ssi` lines and the listings stay plain.
 
-PHP-FPM must run as the same user as cron, or both must be able to write to `private/state/`, as described in the next section.
+`setup.php` runs as the PHP-FPM user, so it writes `private/config.php` as that user. PHP-FPM must run as the same user as cron, or both must be able to write to `private/state/`, as described in the next section.
 
 ## Add the cron job
 
@@ -110,7 +103,7 @@ Before you add the job, run one sync by hand, as the same user cron will use.
 php sync.php --verbose
 ```
 
-It prints each step. The first run fetches the catalogue, so `no catalogue held` should go away. Fix anything it reports as failed before you rely on cron, because cron only emails you about problems.
+It prints each step. The first run fetches the catalogue, so `no catalogue held` should go away. Until a moderator approves the mirror, the run ends with `sync report failed: not approved by the hub yet`. That is expected. Add the cron job anyway. Reports start working once the mirror is approved. Fix anything it reports as failed before you rely on cron, because cron only emails you about problems.
 
 Cron and the web server must run as the same user, or both must be able to write to `private/state/`. The mirror creates that folder with mode 0700, so only the user that created it can write to it. If your host runs them as different users, change the folder's group and permissions yourself.
 
@@ -149,12 +142,14 @@ On Apache the listing style needs the host to let `.htaccess` files set `Indexes
 - `catalogue.json` and `catalogue.sig` are the hub's signed catalogue and its signature
 - `limits.php` tells uploaders how large each upload chunk may be
 - `upload.php` accepts uploads from people the hub has approved
+- `identity.php` gives the mirror's ID, address and public key, and signs a challenge from the hub to prove the mirror holds its key
+- `setup.php` sets the mirror up the first time it is opened, then only shows the link to ask the hub to add it
 
 The mirror creates `listing.json`, `catalogue.json` and `catalogue.sig` itself. The web server must be able to write to `maps/`, `games/`, `.partial/` and `private/`.
 
 ## Keep it running
 
-A quiet `sync.php` run prints nothing when all is well, so cron sends no email. Any output is a problem, written to standard error. Examples are a failed download, a hash mismatch, a catalogue that fails verification and `sync report failed`. A failed report means the sync finished but the hub did not accept the mirror's report. Check that `hub_url` is right, that the hub has your public key and that the server can make outgoing HTTPS requests. The next sync sends the report again.
+A quiet `sync.php` run prints nothing when all is well, so cron sends no email. Any output is a problem, written to standard error. Examples are a failed download, a hash mismatch, a catalogue that fails verification and `sync report failed`. A failed report means the sync finished but the hub did not accept the mirror's report. `not approved by the hub yet` means the hub does not list the mirror yet. Otherwise check that `hub_url` is right and that the server can make outgoing HTTPS requests. The next sync sends the report again.
 
 To see everything a run does, run it by hand with `--verbose`.
 
@@ -167,6 +162,16 @@ To see how fresh the mirror's copy of the catalogue is, run `php bin/check.php`.
 The mirror keeps the sequence number of the catalogue it holds in `private/state/catalogue_seq`, so nobody can swap in an older catalogue through the web folder. If a run reports that `catalogue_seq` is damaged, or missing while `catalogue.json` cannot be read, the mirror refuses every new catalogue until you fix it. Delete `private/state/catalogue_seq`, `catalogue.json` and `catalogue.sig`, then run `php sync.php --verbose` to fetch a fresh catalogue.
 
 The mirror adds a new hub key by itself when the hub publishes one in a signed catalogue. If a mirror missed that and stops accepting catalogues, add the key by hand. Open `private/config.php`, add the new public key as another line in `hub_keys`, keep the old keys, and run `php sync.php --verbose` to confirm. The hub operator tells you when this is needed.
+
+## Set up by hand
+
+Use this when `setup.php` cannot write to `private/`, to point the mirror at a hub other than `hub.coilbox.org`, or for a mirror set up before `setup.php` existed.
+
+1. Copy `private/config.sample.php` to `private/config.php`, or open your existing one.
+2. Set `mirror_id`, `mirror_name` and `base_url`. Mirrors set up before `setup.php` existed need `mirror_name` and `base_url` added, so the hub can check their key at `identity.php`.
+3. For a new mirror, run `php bin/keygen.php` and paste the `secret_key` line it prints. Keep it secret.
+4. Set `hub_url`. Put the hub's public key in `hub_keys`. For `hub.coilbox.org` it is in `src/HubDefaults.php`. Another hub publishes its key at `<hub_url>/api/v1/mirrors/hub-key`. Check it with that hub's operator before you trust it, because whoever holds the matching secret key controls what your mirror stores.
+5. Run `php bin/register.php` and open the link it prints while signed in to the hub. A mirror the hub already lists does not need this.
 
 ## Development
 

@@ -58,7 +58,22 @@ final class Report
     /** Returns true when the hub answers with a 2xx status. */
     public static function send(HttpClient $h, Config $c, string $body): bool
     {
-        $r = $h->postJson($c->hubUrl . '/api/v1/mirrors/report', $body);
+        return self::accepted(self::post($h, $c, $body));
+    }
+
+    public static function post(HttpClient $h, Config $c, string $body): HttpResponse
+    {
+        return $h->postJson($c->hubUrl . '/api/v1/mirrors/report', $body);
+    }
+
+    public static function accepted(HttpResponse $r): bool
+    {
         return $r->status >= 200 && $r->status < 300;
+    }
+
+    /** True when the hub does not know this mirror, which is how it answers until a moderator approves it. */
+    public static function unknownMirror(HttpResponse $r): bool
+    {
+        return $r->status === 403 && (Json::decodeObject($r->body)['error'] ?? null) === 'unknown_mirror';
     }
 }

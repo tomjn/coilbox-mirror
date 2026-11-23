@@ -6,13 +6,17 @@ declare(strict_types=1);
 //
 //   php bin/check.php [--root=<folder>] [--url=https://mirror.example] [--probe-file=maps/<name>]
 //
-// With --url it also requests the mirror over HTTP to check what the web server exposes.
+// With --url it also requests the mirror over HTTP to check what the web server exposes,
+// and checks the hub's published key is one this mirror trusts.
 // The private folder is checked through the real file private/canary.txt. The .partial/
 // folder is only checked by its directory URL, so a file inside it is not requested.
 // It prints each problem and exits 1, or prints ok and exits 0. It writes no files.
 
 require __DIR__ . '/../src/bootstrap.php';
 
+use Mirror\CatalogueStore;
+use Mirror\Config;
+use Mirror\ConfigError;
 use Mirror\Json;
 use Mirror\Limits;
 use Mirror\Paths;
@@ -49,6 +53,21 @@ $problems = Requirements::local($paths, $ini, get_loaded_extensions());
 $webChunk = null;
 if (isset($options['url'])) {
     $problems = [...$problems, ...Requirements::remote(new StreamHttpClient(followRedirects: true), $options['url'], $options['probe-file'] ?? null, $webChunk)];
+}
+
+// The hub's published key should be one this mirror trusts, or the next catalogue will fail to verify.
+// Like the other network checks, it only runs with --url.
+if (isset($options['url']) && is_file($paths->config())) {
+    try {
+        $config = Config::load($paths);
+        $trusted = (new CatalogueStore($paths, $config))->trustedKeys();
+        $published = Requirements::hubKeyProblem(new StreamHttpClient(followRedirects: true), $config->hubUrl, $trusted);
+        if ($published !== null) {
+            $problems[] = $published;
+        }
+    } catch (ConfigError) {
+        // Requirements::local has already named the config problem.
+    }
 }
 
 // The held catalogue shows how fresh this mirror's copy is.
