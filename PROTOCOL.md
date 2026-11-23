@@ -33,6 +33,7 @@ A signature never covers the raw message alone. It covers a context string follo
 | Catalogue | `coilbox-mirror/catalogue/v1\n` | the catalogue file bytes | hub key, or the key named in `next_key` |
 | Hub key endorsement | `coilbox-mirror/hub-key/v1\n` | the 32 raw bytes of the new public key | a hub key the mirror already trusts |
 | Mirror report | `coilbox-mirror/report/v1\n` | the decoded report payload bytes | mirror key |
+| Mirror identity | `coilbox-mirror/identity/v1\n` | the 32 raw challenge bytes followed by the mirror's `base_url` | mirror key |
 
 The mirror verifies the exact bytes it receives. It does not parse and re-serialise before checking a signature. The hub must therefore sign the exact bytes it sends, and must serve those bytes unchanged.
 
@@ -45,6 +46,8 @@ There is no key retirement. Once a mirror has stored a key, it trusts that key f
 ### Mirror identity
 
 A mirror has an id and a key pair. The id is 1 to 64 characters, lowercase letters, digits and hyphens, and does not start with a hyphen. The hub lists the id and public key of every mirror in the catalogue. The mirror's `hub_url` is an `https://` URL, or `http://` only for `127.0.0.1` and `localhost`. A trailing slash is removed.
+
+The optional `base_url` is the mirror's own `https://` address, with no user name, password, query or fragment, and a trailing slash removed. The optional `mirror_name` is 1 to 128 characters of UTF-8 with no control, format or line separator characters. Both are needed for `identity.php` and for the registration link in section 9.
 
 ### JSON output
 
@@ -444,7 +447,7 @@ The mirror reports from its listing, not from a fresh scan. After an upload fini
 
 ### Response
 
-The mirror treats any 2xx status as success and ignores the body. Any other status, or no answer, is a failure.
+The mirror treats any 2xx status as success and ignores the body. Any other status, or no answer, is a failure. The hub answers `403` with `{"error":"unknown_mirror"}` for a mirror it does not list, which is how it answers until a moderator approves a new mirror. `sync.php` logs that as `sync report failed: not approved by the hub yet`.
 
 - After an upload, a failure sets `reported` to `false` in the upload response. The mirror does not retry. The next sync sends the report again.
 - After a sync, a failure makes `sync.php` log the failure and exit with status 1.
@@ -459,7 +462,43 @@ The report format has no replay protection beyond `sent_at`. If the hub wants to
 
 Fixtures: `fixtures/report-sync.json` and `fixtures/report-upload.json`. Both are request bodies. Both are signed by the mirror key and report the first catalogue. The listing holds one file that catalogue does not list, so each report has one `unknown` entry.
 
-## 8. Fixtures
+## 8. identity.php and the hub key
+
+### GET identity.php
+
+The hub uses this to check that the server at a mirror's address holds the mirror's secret key. It sends `GET {base_url}/identity.php?challenge=<base64url of 32 random bytes>`.
+
+`200` with:
+
+```json
+{"mirror_id":"my-mirror","base_url":"https://mirror.example.org","public_key":"<base64url>","sig":"<base64url>"}
+```
+
+`sig` is the mirror identity signature from section 1, over the decoded challenge followed by `base_url`. Signing the address means another server cannot pass the check by relaying this mirror's answer under its own address. Without `challenge`, the answer leaves out `sig`.
+
+| Status | Body | When |
+| --- | --- | --- |
+| `400` | `{"error":"bad_challenge"}` | `challenge` is not base64url of exactly 32 bytes |
+| `404` | `{"error":"not_set_up"}` | there is no config, or it has no `base_url` |
+| `405` | `{"error":"method_not_allowed"}` | not a GET |
+
+The hub requires `mirror_id`, `base_url` and `public_key` to match what it expects, and the signature to verify. It does not follow redirects, and it refuses addresses that resolve to private, loopback, link-local or reserved networks.
+
+### GET {hub_url}/api/v1/mirrors/hub-key
+
+The hub's public key. `next` is present only while the hub is rotating to a new key, with the hub key endorsement from section 1.
+
+```json
+{"public_key":"<base64url>","next":{"public_key":"<base64url>","sig":"<base64url>"}}
+```
+
+`bin/check.php --url=...` fetches it and names a problem when the mirror does not trust the published key. The mirror never adds a key from this endpoint to `hub_keys` by itself. New keys come only from a signed catalogue.
+
+## 9. Registration
+
+`setup.php` and `bin/register.php` give a link to `{hub_url}/mirrors/new` with the query parameters `id`, `name`, `url` and `key`, the mirror's `mirror_id`, `mirror_name`, `base_url` and base64url public key. A user signed in to the hub opens it and sends the request. The hub checks `identity.php` before it stores the request, and again when a moderator approves it.
+
+## 10. Fixtures
 
 `fixtures/` holds signed example files made by `php bin/make-fixtures.php [outdir]`. The default folder is `fixtures/`. The script is deterministic. It uses fixed key seeds and fixed times, Ed25519 signatures are deterministic, and all JSON goes through the mirror's own encoder. Running it again gives the same bytes, and `tests/Unit/FixturesTest.php` checks that.
 
