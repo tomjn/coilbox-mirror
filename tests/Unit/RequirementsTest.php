@@ -71,6 +71,7 @@ final class RequirementsTest extends TestCase
         $http->on(self::BASE . '/sync.php', new HttpResponse(403, '{"error":"forbidden"}'));
         $http->on(self::BASE . '/limits.php', new HttpResponse(200, '{"v":1,"max_chunk_bytes":1048576}'));
         $http->on(self::BASE . '/upload.php', new HttpResponse(400, '{"error":"bad_request"}'));
+        $http->on(self::BASE . '/identity.php', new HttpResponse(200, '{"mirror_id":"m1","base_url":"https://m","public_key":"k"}'));
         return $http;
     }
 
@@ -341,5 +342,31 @@ final class RequirementsTest extends TestCase
         $this->assertSame(1, $status);
         $this->assertStringContainsString('private/config.php', $out);
         $this->assertStringNotContainsString('ok', $out);
+    }
+
+    public function test_remote_accepts_identity_before_setup_and_flags_php_source(): void
+    {
+        $http = $this->cleanRemote();
+        $http->on(self::BASE . '/identity.php', new HttpResponse(404, '{"error":"not_set_up"}'));
+        $this->assertSame([], Requirements::remote($http, self::BASE));
+
+        $http->on(self::BASE . '/identity.php', new HttpResponse(200, '<?php require ...'));
+        $problems = Requirements::remote($http, self::BASE);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('identity.php answered 200 and sent the PHP source', $problems[0]);
+    }
+
+    public function test_hub_key_problem_names_an_untrusted_or_unreadable_key(): void
+    {
+        $hub = 'https://hub.example';
+        $key = random_bytes(32);
+        $http = new FakeHttpClient();
+
+        $http->on($hub . '/api/v1/mirrors/hub-key', new HttpResponse(200, '{"public_key":"' . B64::encode($key) . '"}'));
+        $this->assertNull(Requirements::hubKeyProblem($http, $hub, [random_bytes(32), $key]));
+        $this->assertStringContainsString('is not in hub_keys', (string) Requirements::hubKeyProblem($http, $hub, [random_bytes(32)]));
+
+        $http->on($hub . '/api/v1/mirrors/hub-key', new HttpResponse(404, ''));
+        $this->assertStringContainsString('could not be read', (string) Requirements::hubKeyProblem($http, $hub, [$key]));
     }
 }

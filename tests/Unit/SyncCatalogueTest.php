@@ -446,4 +446,12 @@ final class SyncCatalogueTest extends TestCase
         $this->assertSame(1, $this->sync()->run());
         $this->assertCount(1, $this->http->posts);
     }
+
+    public function test_report_says_when_the_hub_has_not_approved_the_mirror(): void
+    {
+        $this->http->on(self::HUB . '/api/v1/mirrors/report', new HttpResponse(403, '{"error":"unknown_mirror"}'));
+
+        $this->assertFalse($this->sync()->report());
+        $this->assertSame(['sync report failed: not approved by the hub yet'], $this->log);
+    }
 }
