@@ -10,6 +10,7 @@ final class Crypto
     public const CTX_CATALOGUE = "coilbox-mirror/catalogue/v1\n";
     public const CTX_HUB_KEY = "coilbox-mirror/hub-key/v1\n";
     public const CTX_REPORT = "coilbox-mirror/report/v1\n";
+    public const CTX_IDENTITY = "coilbox-mirror/identity/v1\n";
 
     /** Returns the raw 64 byte signature of the context followed by the message. */
     public static function sign(string $ctx, string $msg, string $secretKey): string

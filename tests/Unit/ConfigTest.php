@@ -170,4 +170,30 @@ final class ConfigTest extends TestCase
             TempMirror::destroy($paths);
         }
     }
+
+    public function test_base_url_and_mirror_name_are_optional(): void
+    {
+        $config = Config::fromArray(self::valid());
+        $this->assertNull($config->baseUrl);
+        $this->assertNull($config->mirrorName);
+
+        $config = Config::fromArray(self::valid() + ['base_url' => 'https://mirror.example.org/files/', 'mirror_name' => 'Mirror "one"']);
+        $this->assertSame('https://mirror.example.org/files', $config->baseUrl);
+        $this->assertSame('Mirror "one"', $config->mirrorName);
+    }
+
+    public function test_bad_base_url_or_mirror_name_is_refused(): void
+    {
+        foreach ([
+            ['base_url', 'http://mirror.example.org'], ['base_url', 'https://u:p@mirror.example.org'], ['base_url', 'https://mirror.example.org?x'],
+            ['base_url', 'https://'], ['base_url', 42], ['mirror_name', ''], ['mirror_name', str_repeat('n', 129)], ['mirror_name', "a\nb"], ['mirror_name', "\xff"],
+        ] as [$key, $value]) {
+            try {
+                Config::fromArray([$key => $value] + self::valid());
+                $this->fail("$key accepted " . var_export($value, true));
+            } catch (ConfigError $e) {
+                $this->assertStringContainsString($key, $e->getMessage());
+            }
+        }
+    }
 }
