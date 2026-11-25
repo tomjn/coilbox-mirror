@@ -102,6 +102,14 @@ final class CatalogueTest extends TestCase
         ], $dropped);
     }
 
+    public function test_an_engine_is_always_the_engine_kind(): void
+    {
+        foreach (['x', 'game', 'map'] as $kind) {
+            [$engines] = Catalogue::engines(self::doc() + ['engines' => [self::engine(['kind' => $kind])]]);
+            $this->assertSame('engine', $engines[0]['kind']);
+        }
+    }
+
     public function test_engines_that_is_not_a_list_drops_them_all(): void
     {
         foreach ([['a' => self::engine()], 'x', 5] as $bad) {

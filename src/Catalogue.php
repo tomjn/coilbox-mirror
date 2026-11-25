@@ -68,7 +68,8 @@ final class Catalogue
                 && self::validHash($e['sha256'] ?? null)
                 && is_int($e['size'] ?? null) && $e['size'] >= 1
             ) {
-                $engines[] = $e + ['kind' => 'engine'];
+                // The kind is set here, so an entry cannot name another folder.
+                $engines[] = array_merge($e, ['kind' => 'engine']);
             } else {
                 $dropped[] = "catalogue engine entry $i dropped, malformed";
             }
