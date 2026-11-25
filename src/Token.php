@@ -57,8 +57,8 @@ final class Token
             || !is_string($p['upload']) || preg_match('/\A[A-Za-z0-9-]{1,64}\z/', $p['upload']) !== 1
             || !is_string($p['sha256']) || preg_match('/\A[0-9a-f]{64}\z/', $p['sha256']) !== 1
             || !is_int($p['size']) || $p['size'] < 1
-            || !is_string($p['filename']) || !Filename::isValid($p['filename'])
-            || !in_array($p['kind'], ['map', 'game'], true)
+            || !in_array($p['kind'], Paths::KINDS, true)
+            || !is_string($p['filename']) || !Filename::isValidFor($p['kind'], $p['filename'])
             || !is_int($p['start_by'])
         ) {
             throw new ProtocolError('bad_token');

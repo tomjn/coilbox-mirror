@@ -6,6 +6,19 @@ namespace Mirror;
 
 final class Filename
 {
+    /** Engine builds use the name of an official Recoil release, so the hub can read the version and platform from it. */
+    private const ENGINE = '/\\Arecoil_[0-9A-Za-z][0-9A-Za-z.+-]{0,63}_(?:amd64-linux|amd64-windows|arm64-macos)\\.7z\\z/';
+
+    /** Checks a name against the rules for its kind. Maps and games use isValid. An unknown kind is never valid. */
+    public static function isValidFor(string $kind, string $name): bool
+    {
+        return match ($kind) {
+            'map', 'game' => self::isValid($name),
+            'engine' => preg_match(self::ENGINE, $name) === 1,
+            default => false,
+        };
+    }
+
     /**
      * True for a valid UTF-8 name of 1 to 255 bytes that holds no slash, backslash, control, format, line
      * separator or paragraph separator character, does not start with a dot, and ends in .sd7 or .sdz in any case.

@@ -11,7 +11,7 @@ final class TempMirror
     public static function create(): Paths
     {
         $root = sys_get_temp_dir() . '/coilbox-mirror-' . bin2hex(random_bytes(8));
-        foreach (['maps', 'games', '.partial', 'private/state/used'] as $dir) {
+        foreach (['maps', 'games', 'engines', '.partial', 'private/state/used'] as $dir) {
             mkdir("$root/$dir", 0777, true);
         }
         return new Paths($root);

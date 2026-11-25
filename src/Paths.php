@@ -6,6 +6,8 @@ namespace Mirror;
 
 final class Paths
 {
+    public const KINDS = ['map', 'game', 'engine'];
+
     private readonly string $root;
 
     public function __construct(string $root)
@@ -28,14 +30,26 @@ final class Paths
         return $this->root . '/games';
     }
 
-    /** Returns the folder for a kind, which is "map" or "game". */
-    public function dirFor(string $kind): string
+    public function engines(): string
+    {
+        return $this->root . '/engines';
+    }
+
+    /** Returns the folder name for a kind, relative to the root. */
+    public static function folderFor(string $kind): string
     {
         return match ($kind) {
-            'map' => $this->maps(),
-            'game' => $this->games(),
+            'map' => 'maps',
+            'game' => 'games',
+            'engine' => 'engines',
             default => throw new \InvalidArgumentException("Unknown kind: $kind"),
         };
+    }
+
+    /** Returns the folder for a kind. */
+    public function dirFor(string $kind): string
+    {
+        return $this->root . '/' . self::folderFor($kind);
     }
 
     public function partial(): string

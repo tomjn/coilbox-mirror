@@ -59,7 +59,7 @@ final class TwoMirrorsTest extends TestCase
     private function startMirror(string $id, bool $configured = true): void
     {
         $dir = "{$this->base}/$id";
-        foreach (['maps', 'games', '.partial', 'private'] as $sub) {
+        foreach (['maps', 'games', 'engines', '.partial', 'private'] as $sub) {
             mkdir("$dir/$sub", 0777, true);
             copy(self::PROJECT . "/$sub/.htaccess", "$dir/$sub/.htaccess");
         }

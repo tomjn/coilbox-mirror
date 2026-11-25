@@ -81,7 +81,7 @@ final class UploadHandler
         return new Response(201, [
             'complete' => true,
             'received' => $token->size,
-            'path' => ($token->kind === 'map' ? 'maps/' : 'games/') . $token->filename,
+            'path' => Paths::folderFor($token->kind) . '/' . $token->filename,
             // A file missing from the listing would make the report claim the hub's copy is unneeded, so skip it.
             'reported' => $outcome && $this->report($token),
         ]);

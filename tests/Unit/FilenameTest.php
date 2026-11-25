@@ -62,4 +62,33 @@ final class FilenameTest extends TestCase
     {
         $this->assertFalse(Filename::isValid($name));
     }
+
+    /** @return array<string, array{string, string, bool}> */
+    public static function namesByKind(): array
+    {
+        return [
+            'engine release' => ['engine', 'recoil_2026.09.03_arm64-macos.7z', true],
+            'engine test build version' => ['engine', 'recoil_2026.09.01-137-g15f18d5+mac_amd64-linux.7z', true],
+            'engine windows' => ['engine', 'recoil_2026.09.03_amd64-windows.7z', true],
+            'engine longest version' => ['engine', 'recoil_' . str_repeat('1', 64) . '_arm64-macos.7z', true],
+            'engine upper case prefix' => ['engine', 'RECOIL_2026.09.03_arm64-macos.7z', false],
+            'engine upper case extension' => ['engine', 'recoil_2026.09.03_arm64-macos.7Z', false],
+            'engine unknown platform' => ['engine', 'recoil_2026.09.03_riscv-linux.7z', false],
+            'engine version too long' => ['engine', 'recoil_' . str_repeat('1', 65) . '_arm64-macos.7z', false],
+            'engine empty version' => ['engine', 'recoil__arm64-macos.7z', false],
+            'engine version with slash' => ['engine', 'recoil_a/b_arm64-macos.7z', false],
+            'engine trailing newline' => ['engine', "recoil_2026.09.03_arm64-macos.7z\n", false],
+            'engine with a map name' => ['engine', 'map.sd7', false],
+            'map with an engine name' => ['map', 'recoil_2026.09.03_arm64-macos.7z', false],
+            'map' => ['map', 'Test Map.sd7', true],
+            'game' => ['game', 'game-1.0.SDZ', true],
+            'unknown kind' => ['mod', 'x.sd7', false],
+        ];
+    }
+
+    #[DataProvider('namesByKind')]
+    public function test_names_are_checked_by_kind(string $kind, string $name, bool $valid): void
+    {
+        $this->assertSame($valid, Filename::isValidFor($kind, $name));
+    }
 }
