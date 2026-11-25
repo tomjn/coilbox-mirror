@@ -90,8 +90,17 @@ final class SyncFetchTest extends TestCase
         ];
     }
 
-    /** Holds a catalogue listing the given archives and removals. */
-    private function hold(array $archives, array $removed = []): void
+    /** @return array<string, mixed> an engine as an archive, with kind engine, as Catalogue::wanted gives it */
+    private static function engine(string $filename, string $bytes): array
+    {
+        return ['filename' => $filename, 'kind' => 'engine', 'sha256' => hash('sha256', $bytes), 'size' => strlen($bytes)];
+    }
+
+    /**
+     * Holds a catalogue listing the given archives, removals and engines. Engines are written as the hub
+     * writes them, without a kind.
+     */
+    private function hold(array $archives, array $removed = [], array $engines = []): void
     {
         $key = B64::encode(Signer::keypair(9)['public']);
         $doc = [
@@ -106,6 +115,12 @@ final class SyncFetchTest extends TestCase
             'archives' => $archives,
             'removed' => $removed,
         ];
+        if ($engines !== []) {
+            $doc['engines'] = array_map(static function (array $e): array {
+                unset($e['kind']);
+                return $e;
+            }, $engines);
+        }
         $json = Json::encode($doc);
         $this->store->accept($json, Signer::sign(Crypto::CTX_CATALOGUE, $json, $this->hubKey['secret']));
     }
@@ -120,8 +135,15 @@ final class SyncFetchTest extends TestCase
             'sha256' => $a['sha256'],
             'mtime' => 1795000000,
         ], $archives);
-        $listing = ['v' => 1, 'generated_at' => self::NOW, 'files' => $files];
-        $this->http->on("https://$id.example/listing.json", new HttpResponse(200, Json::encode($listing)));
+        $this->http->on("https://$id.example/listing.json", new HttpResponse(200, Json::encode(self::listing($files))));
+    }
+
+    /** A listing document with engines in their own list, as the mirror writes it. */
+    private static function listing(array $files): array
+    {
+        $engines = array_values(array_filter($files, static fn (array $f) => $f['kind'] === 'engine'));
+        $listing = ['v' => 1, 'generated_at' => self::NOW, 'files' => array_values(array_filter($files, static fn (array $f) => $f['kind'] !== 'engine'))];
+        return $engines === [] ? $listing : $listing + ['engines' => $engines];
     }
 
     private function peerServes(string $id, string $folder, string $filename, string $bytes): void
@@ -155,6 +177,75 @@ final class SyncFetchTest extends TestCase
         $this->sync()->fetchMissing();
 
         $this->assertSame('game bytes', file_get_contents($this->paths->games() . '/rules.sdz'));
+    }
+
+    public function test_engine_is_requested_from_the_engines_folder(): void
+    {
+        $e = self::engine('recoil_2026.09.03_arm64-macos.7z', 'engine bytes');
+        $this->hold([], [], [$e]);
+        $this->peerHas('m2', [$e]);
+        $this->peerServes('m2', 'engines', 'recoil_2026.09.03_arm64-macos.7z', 'engine bytes');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame(['https://m2.example/engines/recoil_2026.09.03_arm64-macos.7z'], $this->http->downloads);
+        $this->assertSame('engine bytes', file_get_contents($this->paths->engines() . '/recoil_2026.09.03_arm64-macos.7z'));
+        $this->assertSame($e['sha256'], Listing::find(Listing::load($this->paths), 'engine', 'recoil_2026.09.03_arm64-macos.7z')['sha256']);
+    }
+
+    public function test_a_bad_engine_entry_is_logged_and_maps_still_sync(): void
+    {
+        $a = self::archive('one.sd7', 'map bytes');
+        $this->hold([$a], [], [self::engine('x.sd7', 'not an engine')]);
+        $this->peerHas('m2', [$a]);
+        $this->peerServes('m2', 'maps', 'one.sd7', 'map bytes');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame('map bytes', file_get_contents($this->paths->maps() . '/one.sd7'));
+        $this->assertContains('catalogue engine entry 0 dropped, malformed', $this->log);
+    }
+
+    public function test_removed_engine_is_not_fetched(): void
+    {
+        $e = self::engine('recoil_2026.09.03_arm64-macos.7z', 'engine bytes');
+        $this->hold([], [['sha256' => $e['sha256'], 'filename' => $e['filename'], 'reason' => 'withdrawn', 'removed_at' => 1]], [$e]);
+        $this->peerHas('m2', [$e]);
+        $this->peerServes('m2', 'engines', $e['filename'], 'engine bytes');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertSame([], $this->http->downloads);
+        $this->assertFileDoesNotExist($this->paths->engines() . '/' . $e['filename']);
+    }
+
+    public function test_peer_listing_cap_counts_engines(): void
+    {
+        $a = self::archive('one.sd7', 'map bytes');
+        $engines = [];
+        foreach (['amd64-linux', 'amd64-windows', 'arm64-macos'] as $platform) {
+            $engines[] = self::engine("recoil_1_$platform.7z", "engine $platform");
+        }
+        $this->hold([$a], [], $engines);
+        // Fill the peer's listing past the cap for one archive, while staying inside the cap for four.
+        $held = [$a, ...$engines];
+        for ($i = 0; strlen(Json::encode(self::listing(self::asFiles($held)))) <= Listing::maxDocBytes(3); $i++) {
+            $held[] = self::archive("filler-$i.sd7", "filler $i");
+        }
+        $this->assertLessThan(Listing::maxDocBytes(9), strlen(Json::encode(self::listing(self::asFiles($held)))));
+        $this->peerHas('m2', $held);
+        $this->peerServes('m2', 'maps', 'one.sd7', 'map bytes');
+
+        $this->sync()->fetchMissing();
+
+        $this->assertContains('https://m2.example/maps/one.sd7', $this->http->downloads);
+    }
+
+    private static function asFiles(array $archives): array
+    {
+        return array_map(static fn (array $a) => [
+            'filename' => $a['filename'], 'kind' => $a['kind'], 'size' => $a['size'], 'sha256' => $a['sha256'], 'mtime' => 1795000000,
+        ], $archives);
     }
 
     public function test_filename_with_spaces_and_accents_is_url_encoded(): void
