@@ -23,6 +23,7 @@ use PHPUnit\Framework\TestCase;
 final class TwoMirrorsTest extends TestCase
 {
     private const MAP = 'Test Map (v1.2) é.sd7';
+    private const ENGINE = 'recoil_2026.09.01-137-g15f18d5+mac_arm64-macos.7z';
     private const PROJECT = __DIR__ . '/../..';
     private const DEPLOYED = ['upload.php', 'limits.php', 'sync.php', '.htaccess', 'src'];
 
@@ -128,7 +129,7 @@ final class TwoMirrorsTest extends TestCase
     }
 
     /** @return array{0: string, 1: string} the catalogue JSON and its signature */
-    private function signedCatalogue(int $seq, array $archives, array $removed = []): array
+    private function signedCatalogue(int $seq, array $archives, array $removed = [], array $engines = []): array
     {
         $mirrors = [];
         foreach (['a', 'b'] as $id) {
@@ -145,15 +146,35 @@ final class TwoMirrorsTest extends TestCase
             'mirrors' => $mirrors,
             'archives' => $archives,
             'removed' => $removed,
-        ]);
+        ] + ($engines === [] ? [] : ['engines' => $engines]));
         return [$json, Signer::sign(Crypto::CTX_CATALOGUE, $json, $this->hubKey['secret'])];
     }
 
-    private function publishToHub(int $seq, array $archives, array $removed = []): void
+    private function publishToHub(int $seq, array $archives, array $removed = [], array $engines = []): void
     {
-        [$json, $sig] = $this->signedCatalogue($seq, $archives, $removed);
+        [$json, $sig] = $this->signedCatalogue($seq, $archives, $removed, $engines);
         file_put_contents("{$this->hubDir}/catalogue.json", $json);
         file_put_contents("{$this->hubDir}/catalogue.sig", $sig);
+    }
+
+    /** @return array<string, mixed> an engines entry as the hub writes it */
+    private function engine(string $bytes): array
+    {
+        return [
+            'filename' => self::ENGINE,
+            'sha256' => hash('sha256', $bytes),
+            'size' => strlen($bytes),
+            'version' => '2026.09.01-137-g15f18d5+mac',
+            'platform' => 'arm64-macos',
+            'note' => 'Tests the Metal path.',
+        ];
+    }
+
+    private function putEngine(string $id, string $bytes): void
+    {
+        $paths = $this->paths($id);
+        file_put_contents($paths->engines() . '/' . self::ENGINE, $bytes);
+        Listing::write($paths, Listing::build($paths, null, time()));
     }
 
     private function putMap(string $id, string $bytes): void
@@ -300,6 +321,95 @@ final class TwoMirrorsTest extends TestCase
         $this->assertSame('b', $reports[0]['mirror']);
         $this->assertSame('sync', $reports[0]['event']);
         $this->assertSame([hash('sha256', $bytes)], $reports[0]['held']);
+    }
+
+    public function test_engine_upload_through_upload_php_lands_in_engines(): void
+    {
+        $this->startBothMirrors();
+        $bytes = random_bytes(5000);
+        $token = Signer::token([
+            'v' => 1,
+            'mirror' => 'a',
+            'upload' => 'up-engine',
+            'sha256' => hash('sha256', $bytes),
+            'size' => strlen($bytes),
+            'filename' => self::ENGINE,
+            'kind' => 'engine',
+            'start_by' => time() + 3600,
+        ], $this->hubKey['secret']);
+
+        [$status, $body] = $this->uploadChunk($token, 0, $bytes);
+
+        $this->assertSame(201, $status);
+        $this->assertSame('engines/' . self::ENGINE, $body['path']);
+        $this->assertSame(hash('sha256', $bytes), hash_file('sha256', $this->paths('a')->engines() . '/' . self::ENGINE));
+        [$status, $served] = $this->request('GET', $this->mirrorUrl('a') . '/engines/' . rawurlencode(self::ENGINE));
+        $this->assertSame(200, $status);
+        $this->assertSame($bytes, $served);
+        $report = $this->hubReports()[0];
+        $this->assertSame(['map', 'game', 'engine'], $report['kinds']);
+        $this->assertSame([['filename' => self::ENGINE, 'kind' => 'engine', 'size' => strlen($bytes), 'sha256' => hash('sha256', $bytes)]], $report['unknown']);
+    }
+
+    public function test_sync_copies_engine_from_a_to_b_and_reports_kinds(): void
+    {
+        $this->startBothMirrors();
+        $bytes = random_bytes(300000);
+        $this->putEngine('a', $bytes);
+        $this->publishToHub(1, [], [], [$this->engine($bytes)]);
+
+        $this->assertSame(0, $this->sync('b'), implode("\n", $this->log));
+
+        $this->assertSame(hash('sha256', $bytes), hash_file('sha256', $this->paths('b')->engines() . '/' . self::ENGINE));
+        $report = $this->hubReports()[0];
+        $this->assertSame(['map', 'game', 'engine'], $report['kinds']);
+        $this->assertSame([hash('sha256', $bytes)], $report['held']);
+        $this->assertSame([], $report['unknown']);
+    }
+
+    public function test_engine_removal_deletes_from_both_mirrors(): void
+    {
+        $this->startBothMirrors();
+        $bytes = random_bytes(1000);
+        $this->putEngine('a', $bytes);
+        $this->putEngine('b', $bytes);
+        $this->publishToHub(1, [], [], [$this->engine($bytes)]);
+        $this->assertSame(0, $this->sync('a'), implode("\n", $this->log));
+        $this->assertSame(0, $this->sync('b'), implode("\n", $this->log));
+
+        $this->publishToHub(2, [], [[
+            'sha256' => hash('sha256', $bytes),
+            'filename' => self::ENGINE,
+            'reason' => 'withdrawn',
+            'removed_at' => time(),
+        ]]);
+        $this->assertSame(0, $this->sync('a'), implode("\n", $this->log));
+        $this->assertSame(0, $this->sync('b'), implode("\n", $this->log));
+
+        $this->assertFileDoesNotExist($this->paths('a')->engines() . '/' . self::ENGINE);
+        $this->assertFileDoesNotExist($this->paths('b')->engines() . '/' . self::ENGINE);
+    }
+
+    /** A mirror on the release before engines checks a peer listing with these rules, from Listing::isValidDoc. */
+    public function test_a_listing_with_engines_passes_the_previous_release_rules(): void
+    {
+        $this->startMirror('a');
+        $this->putMap('a', 'map bytes');
+        $this->putEngine('a', 'engine bytes');
+
+        [$status, $text] = $this->request('GET', $this->mirrorUrl('a') . '/listing.json');
+
+        $this->assertSame(200, $status);
+        $doc = Json::decodeObject($text);
+        $this->assertSame(1, $doc['v']);
+        $this->assertIsInt($doc['generated_at']);
+        $this->assertTrue(array_is_list($doc['files']));
+        $this->assertSame([self::MAP], array_column($doc['files'], 'filename'));
+        foreach ($doc['files'] as $file) {
+            $this->assertContains($file['kind'], ['map', 'game']);
+            $this->assertTrue(\Mirror\Filename::isValid($file['filename']));
+        }
+        $this->assertSame([self::ENGINE], array_column($doc['engines'], 'filename'));
     }
 
     public function test_resumed_download_appends_with_range(): void
