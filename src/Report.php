@@ -14,13 +14,13 @@ final class Report
     public static function payload(Config $c, ?array $catalogue, array $listing, string $event, ?string $uploadId, int $now): string
     {
         $inCatalogue = [];
-        foreach ($catalogue['archives'] ?? [] as $archive) {
+        foreach ($catalogue === null ? [] : Catalogue::wanted($catalogue) as $archive) {
             $inCatalogue[$archive['sha256']] = true;
         }
 
         $held = [];
         $unknown = [];
-        foreach ($listing['files'] as $file) {
+        foreach (Listing::entries($listing) as $file) {
             $held[$file['sha256']] = true;
             if (!isset($inCatalogue[$file['sha256']])) {
                 $unknown[] = [
@@ -44,6 +44,8 @@ final class Report
             'catalogue_generated_at' => $catalogue['generated_at'] ?? null,
             'held' => $held,
             'unknown' => $unknown,
+            // Tells the hub this mirror takes engines. Mirrors on earlier releases send no kinds.
+            'kinds' => Paths::KINDS,
         ]);
     }
 
