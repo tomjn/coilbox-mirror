@@ -183,11 +183,11 @@ final class Sync
         $deleted = [];
         $this->withDiskLock(function () use ($hashes, $names, &$deleted): void {
             $listing = Listing::build($this->paths, Listing::load($this->paths), ($this->now)());
-            foreach ($listing['files'] as $file) {
+            foreach (Listing::entries($listing) as $file) {
                 if (!isset($hashes[$file['sha256']]) && !isset($names[mb_strtolower($file['filename'])])) {
                     continue;
                 }
-                $relative = ($file['kind'] === 'map' ? 'maps/' : 'games/') . $file['filename'];
+                $relative = Paths::folderFor($file['kind']) . '/' . $file['filename'];
                 if (@unlink($this->paths->root() . '/' . $relative)) {
                     $deleted[] = $relative;
                     $this->log("removed $relative");
@@ -217,11 +217,15 @@ final class Sync
         if ($held === null) {
             return;
         }
+        foreach (Catalogue::engines($held)[1] as $line) {
+            $this->log($line);
+        }
+        $wanted = Catalogue::wanted($held);
         $own = Listing::load($this->paths) ?? Listing::build($this->paths, null, ($this->now)());
         [$removedHashes, $removedNames] = self::removedSets($held);
 
         $missing = [];
-        foreach ($held['archives'] as $archive) {
+        foreach ($wanted as $archive) {
             if (
                 $this->isOnDisk($own, $archive)
                 || isset($removedHashes[$archive['sha256']])
@@ -240,7 +244,7 @@ final class Sync
             return;
         }
 
-        $listings = $this->peerListings($held['mirrors'], count($held['archives']));
+        $listings = $this->peerListings($held['mirrors'], count($wanted));
         $peers = [];
         foreach (($this->orderPeers)(array_keys($listings)) as $baseUrl) {
             $peers[$baseUrl] = $listings[$baseUrl];
@@ -261,7 +265,8 @@ final class Sync
     /** @return array<string, array> each usable peer's listing, keyed by base URL */
     private function peerListings(array $mirrors, int $archiveCount): array
     {
-        // Policy: a peer listing may hold as many unknown files as there are catalogue archives, so the factor is 2.
+        // Policy: a peer listing may hold as many unknown files as there are catalogue archives and engines, so
+        // the factor is 2.
         $cap = Listing::maxDocBytes(2 * $archiveCount + 1);
         $listings = [];
         foreach ($mirrors as $peer) {
@@ -282,7 +287,7 @@ final class Sync
     private function isOnDisk(array $listing, array $archive): bool
     {
         $name = mb_strtolower($archive['filename']);
-        foreach ($listing['files'] as $file) {
+        foreach (Listing::entries($listing) as $file) {
             if ($file['kind'] === $archive['kind'] && $file['sha256'] === $archive['sha256'] && mb_strtolower($file['filename']) === $name) {
                 return true;
             }
@@ -294,7 +299,7 @@ final class Sync
     private function nameTakenByOtherHash(array $listing, array $archive): ?array
     {
         $name = mb_strtolower($archive['filename']);
-        foreach ($listing['files'] as $file) {
+        foreach (Listing::entries($listing) as $file) {
             if ($file['kind'] === $archive['kind'] && mb_strtolower($file['filename']) === $name && $file['sha256'] !== $archive['sha256']) {
                 return $file;
             }
@@ -308,7 +313,7 @@ final class Sync
      */
     private function fetchOne(array $archive, array $peers, array &$badPeers): bool
     {
-        $folder = $archive['kind'] === 'map' ? 'maps' : 'games';
+        $folder = Paths::folderFor($archive['kind']);
         $partial = $this->paths->partial() . '/sync-' . $archive['sha256'];
 
         foreach ($peers as $baseUrl => $listing) {

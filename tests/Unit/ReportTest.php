@@ -75,7 +75,45 @@ final class ReportTest extends TestCase
             'catalogue_generated_at' => 1795000000,
             'held' => [self::NEW, self::KNOWN],
             'unknown' => [['filename' => 'new.sd7', 'kind' => 'map', 'size' => 123, 'sha256' => self::NEW]],
+            'kinds' => ['map', 'game', 'engine'],
         ], Json::decodeObject($json));
+    }
+
+    public function test_payload_carries_kinds_after_unknown(): void
+    {
+        $doc = Json::decodeObject(Report::payload($this->config(), null, $this->listing(), 'sync', null, 1795000002));
+        $this->assertSame(['unknown', 'kinds'], array_slice(array_keys($doc), -2));
+        $this->assertSame(['map', 'game', 'engine'], $doc['kinds']);
+    }
+
+    private const ENGINE = 'recoil_2026.09.03_arm64-macos.7z';
+    private const ENGINE_SHA = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+
+    /** @return array<string, mixed> the listing with one engine */
+    private function listingWithEngine(): array
+    {
+        return $this->listing() + ['engines' => [
+            ['filename' => self::ENGINE, 'kind' => 'engine', 'size' => 9, 'sha256' => self::ENGINE_SHA, 'mtime' => 4],
+        ]];
+    }
+
+    public function test_a_held_engine_in_the_catalogue_is_not_unknown(): void
+    {
+        $catalogue = $this->catalogue() + ['engines' => [
+            ['filename' => self::ENGINE, 'sha256' => self::ENGINE_SHA, 'size' => 9, 'version' => '2026.09.03', 'platform' => 'arm64-macos', 'note' => 'n'],
+        ]];
+        $doc = Json::decodeObject(Report::payload($this->config(), $catalogue, $this->listingWithEngine(), 'sync', null, 1795000002));
+        $this->assertContains(self::ENGINE_SHA, $doc['held']);
+        $this->assertSame(['new.sd7'], array_column($doc['unknown'], 'filename'));
+    }
+
+    public function test_a_held_engine_not_in_the_catalogue_is_unknown_with_kind_engine(): void
+    {
+        $doc = Json::decodeObject(Report::payload($this->config(), $this->catalogue(), $this->listingWithEngine(), 'upload', 'u-1', 1795000002));
+        $this->assertContains(
+            ['filename' => self::ENGINE, 'kind' => 'engine', 'size' => 9, 'sha256' => self::ENGINE_SHA],
+            $doc['unknown'],
+        );
     }
 
     public function test_payload_carries_the_upload_id(): void

@@ -173,6 +173,14 @@ final class UploadFinishTest extends TestCase
         $this->assertFileExists($this->paths->games() . '/game.sdz');
     }
 
+    public function test_engine_upload_goes_to_engines_folder(): void
+    {
+        $r = $this->upload($this->token(['filename' => 'recoil_2026.09.03_arm64-macos.7z', 'kind' => 'engine']));
+        $this->assertSame(201, $r->status);
+        $this->assertSame('engines/recoil_2026.09.03_arm64-macos.7z', $r->body['path']);
+        $this->assertSame($this->body, file_get_contents($this->paths->engines() . '/recoil_2026.09.03_arm64-macos.7z'));
+    }
+
     public function test_hash_mismatch_deletes_partial_and_returns_422(): void
     {
         $token = $this->token(['sha256' => hash('sha256', 'something else')]);

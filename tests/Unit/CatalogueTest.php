@@ -61,6 +61,80 @@ final class CatalogueTest extends TestCase
         $this->assertSame('x.sd7', $cat['archives'][0]['filename']);
     }
 
+    /** @return array<string, mixed> an engines entry as the hub writes it, without a kind */
+    private static function engine(array $override = []): array
+    {
+        return $override + [
+            'filename' => 'recoil_2026.09.03_arm64-macos.7z', 'sha256' => str_repeat('b', 64), 'size' => 456,
+            'version' => '2026.09.03', 'platform' => 'arm64-macos', 'note' => 'Tests the Metal path.',
+        ];
+    }
+
+    public function test_valid_engines_get_the_engine_kind(): void
+    {
+        [$engines, $dropped] = Catalogue::engines(self::doc() + ['engines' => [self::engine()]]);
+        $this->assertSame([self::engine() + ['kind' => 'engine']], $engines);
+        $this->assertSame([], $dropped);
+    }
+
+    public function test_a_bad_engine_entry_is_dropped_and_the_rest_are_kept(): void
+    {
+        $missingName = self::engine();
+        unset($missingName['filename']);
+        $doc = self::doc() + ['engines' => [
+            self::engine(['filename' => 'x.sd7']),
+            self::engine(),
+            self::engine(['sha256' => str_repeat('B', 64)]),
+            self::engine(['size' => 0]),
+            'not an object',
+            $missingName,
+        ]];
+
+        [$engines, $dropped] = Catalogue::engines($doc);
+
+        $this->assertSame([self::engine() + ['kind' => 'engine']], $engines);
+        $this->assertSame([
+            'catalogue engine entry 0 dropped, malformed',
+            'catalogue engine entry 2 dropped, malformed',
+            'catalogue engine entry 3 dropped, malformed',
+            'catalogue engine entry 4 dropped, malformed',
+            'catalogue engine entry 5 dropped, malformed',
+        ], $dropped);
+    }
+
+    public function test_an_engine_is_always_the_engine_kind(): void
+    {
+        foreach (['x', 'game', 'map'] as $kind) {
+            [$engines] = Catalogue::engines(self::doc() + ['engines' => [self::engine(['kind' => $kind])]]);
+            $this->assertSame('engine', $engines[0]['kind']);
+        }
+    }
+
+    public function test_engines_that_is_not_a_list_drops_them_all(): void
+    {
+        foreach ([['a' => self::engine()], 'x', 5] as $bad) {
+            $this->assertSame([[], ['catalogue engines list dropped, malformed']], Catalogue::engines(self::doc() + ['engines' => $bad]));
+        }
+    }
+
+    public function test_no_engines_key_gives_no_engines_and_no_lines(): void
+    {
+        $this->assertSame([[], []], Catalogue::engines(self::doc()));
+    }
+
+    public function test_a_catalogue_with_a_bad_engine_still_verifies(): void
+    {
+        $hub = Signer::keypair(1);
+        [$json, $sig] = $this->signed(self::doc() + ['engines' => [self::engine(['size' => 'big'])]], $hub['secret']);
+        $this->assertSame(42, Catalogue::verify($json, $sig, [$hub['public']], 41)['seq']);
+    }
+
+    public function test_wanted_lists_archives_then_engines(): void
+    {
+        $doc = self::doc() + ['engines' => [self::engine(), self::engine(['size' => 0])]];
+        $this->assertSame([$doc['archives'][0], self::engine() + ['kind' => 'engine']], Catalogue::wanted($doc));
+    }
+
     public function test_one_changed_byte_is_bad_signature(): void
     {
         $hub = Signer::keypair(1);

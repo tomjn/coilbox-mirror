@@ -7,6 +7,8 @@ maps/*
 !maps/.htaccess
 games/*
 !games/.htaccess
+engines/*
+!engines/.htaccess
 /catalogue.json
 /catalogue.sig
 /listing.json

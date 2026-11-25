@@ -57,6 +57,15 @@ final class TokenTest extends TestCase
         $this->assertSame(1795000000, $t->startBy);
     }
 
+    public function test_engine_token_is_accepted(): void
+    {
+        $hub = Signer::keypair(1);
+        $payload = [...self::payload(), 'kind' => 'engine', 'filename' => 'recoil_2026.09.03_arm64-macos.7z'];
+        $t = Token::verify(Signer::token($payload, $hub['secret']), [$hub['public']], 'm1');
+        $this->assertSame('engine', $t->kind);
+        $this->assertSame('recoil_2026.09.03_arm64-macos.7z', $t->filename);
+    }
+
     public function test_signature_from_unlisted_key_is_bad_token(): void
     {
         $hub = Signer::keypair(1);
@@ -117,6 +126,9 @@ final class TokenTest extends TestCase
             'filename not a string' => [[...$p, 'filename' => 5]],
             'kind unknown' => [[...$p, 'kind' => 'mod']],
             'kind upper case' => [[...$p, 'kind' => 'Map']],
+            'engine kind with a map filename' => [[...$p, 'kind' => 'engine']],
+            'map kind with an engine filename' => [[...$p, 'filename' => 'recoil_1_arm64-macos.7z']],
+            'kind not a string' => [[...$p, 'kind' => 1]],
             'upload empty' => [[...$p, 'upload' => '']],
             'upload too long' => [[...$p, 'upload' => str_repeat('a', 65)]],
             'upload with dot' => [[...$p, 'upload' => 'a.b']],

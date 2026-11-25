@@ -68,6 +68,7 @@ final class RequirementsTest extends TestCase
             $http->on(self::BASE . '/' . $path, new HttpResponse($i % 2 === 0 ? 403 : 404, ''));
         }
         $http->on(self::BASE . '/maps/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /maps</body></html>'));
+        $http->on(self::BASE . '/engines/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /engines</body></html>'));
         $http->on(self::BASE . '/sync.php', new HttpResponse(403, '{"error":"forbidden"}'));
         $http->on(self::BASE . '/limits.php', new HttpResponse(200, '{"v":1,"max_chunk_bytes":1048576}'));
         $http->on(self::BASE . '/upload.php', new HttpResponse(400, '{"error":"bad_request"}'));
@@ -123,6 +124,13 @@ final class RequirementsTest extends TestCase
         $problems = Requirements::local($this->paths, $this->ini(), $this->extensions());
         $this->assertCount(1, $problems);
         $this->assertStringContainsString('.partial/', $problems[0]);
+    }
+
+    public function test_missing_engines_folder_is_named(): void
+    {
+        rmdir($this->paths->engines());
+        $problems = Requirements::local($this->paths, $this->ini(), $this->extensions());
+        $this->assertSame(['engines/ is missing or not writable by the PHP user.'], $problems);
     }
 
     public function test_fresh_install_without_state_folder_is_fine_when_private_is_writable(): void
@@ -220,6 +228,18 @@ final class RequirementsTest extends TestCase
         $http = $this->cleanRemote();
         $http->on(self::BASE . '/maps/', new HttpResponse(403, ''));
         $this->assertStringContainsString('maps/', implode("\n", Requirements::remote($http, self::BASE)));
+    }
+
+    public function test_remote_flags_an_engines_folder_the_hub_cannot_read(): void
+    {
+        foreach ([403, 404, 301] as $status) {
+            $http = $this->cleanRemote();
+            $http->on(self::BASE . '/engines/', new HttpResponse($status, ''));
+            $problems = Requirements::remote($http, self::BASE);
+            $this->assertCount(1, $problems, "status $status");
+            $this->assertStringStartsWith('engines/ answered', $problems[0]);
+            $this->assertStringContainsString('the hub marks the mirror unhealthy', $problems[0]);
+        }
     }
 
     public function test_remote_explains_a_500_on_maps_as_the_listing_style(): void

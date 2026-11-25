@@ -281,6 +281,18 @@ final class SyncCatalogueTest extends TestCase
         $this->assertFileDoesNotExist($this->paths->partial() . '/sync-' . hash('sha256', 'three'));
     }
 
+    public function test_removal_deletes_an_engine_and_its_partial(): void
+    {
+        $this->put('engines/recoil_1_arm64-macos.7z', 'engine');
+        $this->put('.partial/sync-' . hash('sha256', 'engine'), 'half');
+        $this->hold(5, [['sha256' => hash('sha256', 'engine'), 'filename' => 'recoil_1_arm64-macos.7z', 'reason' => 'withdrawn', 'removed_at' => 1]]);
+
+        $this->assertSame(['engines/recoil_1_arm64-macos.7z'], $this->sync()->applyRemovals());
+        $this->assertFileDoesNotExist($this->paths->engines() . '/recoil_1_arm64-macos.7z');
+        $this->assertFileDoesNotExist($this->paths->partial() . '/sync-' . hash('sha256', 'engine'));
+        $this->assertArrayNotHasKey('engines', Listing::load($this->paths));
+    }
+
     public function test_removals_take_deleted_files_out_of_the_listing(): void
     {
         $this->put('maps/gone.sd7', 'one');
