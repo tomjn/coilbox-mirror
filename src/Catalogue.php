@@ -44,6 +44,50 @@ final class Catalogue
     }
 
     /**
+     * Returns the engines the mirror should hold, each with kind "engine", and one log line for each entry
+     * dropped. Each entry is checked on its own, so one bad engine does not stop maps and games syncing.
+     * Only the fields the mirror uses are checked.
+     *
+     * @param array<string, mixed> $doc a catalogue that verify() accepted
+     * @return array{0: list<array<string, mixed>>, 1: list<string>}
+     */
+    public static function engines(array $doc): array
+    {
+        if (!array_key_exists('engines', $doc)) {
+            return [[], []];
+        }
+        if (!is_array($doc['engines']) || !array_is_list($doc['engines'])) {
+            return [[], ['catalogue engines list dropped, malformed']];
+        }
+        $engines = [];
+        $dropped = [];
+        foreach ($doc['engines'] as $i => $e) {
+            if (
+                is_array($e)
+                && is_string($e['filename'] ?? null) && Filename::isValidFor('engine', $e['filename'])
+                && self::validHash($e['sha256'] ?? null)
+                && is_int($e['size'] ?? null) && $e['size'] >= 1
+            ) {
+                $engines[] = $e + ['kind' => 'engine'];
+            } else {
+                $dropped[] = "catalogue engine entry $i dropped, malformed";
+            }
+        }
+        return [$engines, $dropped];
+    }
+
+    /**
+     * Returns every archive and engine the mirror should hold.
+     *
+     * @param array<string, mixed> $doc a catalogue that verify() accepted
+     * @return list<array<string, mixed>>
+     */
+    public static function wanted(array $doc): array
+    {
+        return [...$doc['archives'], ...self::engines($doc)[0]];
+    }
+
+    /**
      * @param list<string> $trustedKeys
      * @return string the raw endorsed public key
      * @throws CatalogueRejected bad_key_endorsement
