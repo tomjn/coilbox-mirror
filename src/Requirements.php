@@ -57,7 +57,7 @@ final class Requirements
 
         // private/state/ is made by the first request, so on a fresh install it is enough that private/ is writable.
         $state = is_dir($p->state()) || !is_dir($p->private()) ? $p->state() : $p->private();
-        $folders = ['maps/' => $p->maps(), 'games/' => $p->games(), '.partial/' => $p->partial(), 'private/state/' => $state];
+        $folders = ['maps/' => $p->maps(), 'games/' => $p->games(), 'engines/' => $p->engines(), '.partial/' => $p->partial(), 'private/state/' => $state];
         foreach ($folders as $name => $dir) {
             if (!is_dir($dir) || !is_writable($dir)) {
                 $problems[] = "$name is missing or not writable by the PHP user.";
@@ -90,7 +90,7 @@ final class Requirements
         $maps = $h->get("$base/maps/");
         if ($maps->status !== 200 || preg_match('/<html|<!doctype/i', $maps->body) !== 1) {
             $problems[] = 'maps/ answered ' . self::describe($maps->status) . ' without an HTML page. It must answer 200 with a page that lists the archives.'
-                . ($maps->status === 500 ? ' The likeliest cause is a host that does not let .htaccess files set Indexes options. Delete the Listing style lines in maps/.htaccess and games/.htaccess to fall back to a plain listing.' : '');
+                . ($maps->status === 500 ? ' The likeliest cause is a host that does not let .htaccess files set Indexes options. Delete the Listing style lines in maps/.htaccess, games/.htaccess and engines/.htaccess to fall back to a plain listing.' : '');
         }
 
         $sync = $h->get("$base/sync.php")->status;

@@ -125,6 +125,13 @@ final class RequirementsTest extends TestCase
         $this->assertStringContainsString('.partial/', $problems[0]);
     }
 
+    public function test_missing_engines_folder_is_named(): void
+    {
+        rmdir($this->paths->engines());
+        $problems = Requirements::local($this->paths, $this->ini(), $this->extensions());
+        $this->assertSame(['engines/ is missing or not writable by the PHP user.'], $problems);
+    }
+
     public function test_fresh_install_without_state_folder_is_fine_when_private_is_writable(): void
     {
         rmdir($this->paths->state() . '/used');

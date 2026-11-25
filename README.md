@@ -1,6 +1,6 @@
 # Coilbox mirror
 
-A mirror stores Recoil map and game archives and serves them over plain HTTP. Players download from it, and the Coilbox hub decides who may upload to it.
+A mirror stores Recoil map and game archives, and engine test builds, and serves them over plain HTTP. Players download from it, and the Coilbox hub decides who may upload to it.
 
 The hub is a separate website. It keeps a signed catalogue of every archive and every mirror. Each mirror stores a copy of that catalogue and checks its signature with the hub's public keys. A mirror also copies files from the other mirrors listed in the catalogue, so mirrors keep syncing with each other if the hub goes away.
 
@@ -49,6 +49,7 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
    - `private/`
    - `maps/`
    - `games/`
+   - `engines/`
    - `.partial/`
 
    Keep these off the server: `vendor/`, `tests/`, `fixtures/`, `composer.json`, `composer.lock`, `phpunit.xml.dist` and `.git`. `PROTOCOL.md` and this README are optional.
@@ -123,7 +124,7 @@ DreamHost users can add the job in the panel's cron section. Enter the same comm
 
 ## Put your name on the listing pages
 
-The `maps/` and `games/` pages list every archive. They carry the Coilbox Hub heading, a link back to the hub and a line thanking you for hosting the mirror.
+The `maps/`, `games/` and `engines/` pages list every archive. They carry the Coilbox Hub heading, a link back to the hub and a line thanking you for hosting the mirror.
 
 Copy `listing-header.sample.html` to `listing-header.html`, then put your name and link in the line that starts `Thanks to`.
 
@@ -133,19 +134,20 @@ cp listing-header.sample.html listing-header.html
 
 Without `listing-header.html` the pages still list the files and keep the hub's colours, but have no heading. Updating the mirror leaves your copy alone, because only the sample ships with it.
 
-On Apache the listing style needs the host to let `.htaccess` files set `Indexes` options. DreamHost does. On a host that does not, `maps/` answers 500 and `php bin/check.php --url=...` says so. To fall back to a plain listing, delete the lines under the `Listing style` comment in `maps/.htaccess` and `games/.htaccess`.
+On Apache the listing style needs the host to let `.htaccess` files set `Indexes` options. DreamHost does. On a host that does not, `maps/` answers 500 and `php bin/check.php --url=...` says so. To fall back to a plain listing, delete the lines under the `Listing style` comment in `maps/.htaccess`, `games/.htaccess` and `engines/.htaccess`.
 
 ## What the mirror serves
 
 - `maps/` and `games/` hold the archives
-- `listing.json` lists every file in `maps/` and `games/` with its size and SHA-256 hash
+- `engines/` holds engine test builds that the hub's trusted uploaders publish
+- `listing.json` lists every file in `maps/`, `games/` and `engines/` with its size and SHA-256 hash
 - `catalogue.json` and `catalogue.sig` are the hub's signed catalogue and its signature
 - `limits.php` tells uploaders how large each upload chunk may be
 - `upload.php` accepts uploads from people the hub has approved
 - `identity.php` gives the mirror's ID, address and public key, and signs a challenge from the hub to prove the mirror holds its key
 - `setup.php` sets the mirror up the first time it is opened, then only shows the link to ask the hub to add it
 
-The mirror creates `listing.json`, `catalogue.json` and `catalogue.sig` itself. The web server must be able to write to `maps/`, `games/`, `.partial/` and `private/`.
+The mirror creates `listing.json`, `catalogue.json` and `catalogue.sig` itself. The web server must be able to write to `maps/`, `games/`, `engines/`, `.partial/` and `private/`.
 
 ## Keep it running
 
@@ -162,6 +164,16 @@ To see how fresh the mirror's copy of the catalogue is, run `php bin/check.php`.
 The mirror keeps the sequence number of the catalogue it holds in `private/state/catalogue_seq`, so nobody can swap in an older catalogue through the web folder. If a run reports that `catalogue_seq` is damaged, or missing while `catalogue.json` cannot be read, the mirror refuses every new catalogue until you fix it. Delete `private/state/catalogue_seq`, `catalogue.json` and `catalogue.sig`, then run `php sync.php --verbose` to fetch a fresh catalogue.
 
 The mirror adds a new hub key by itself when the hub publishes one in a signed catalogue. If a mirror missed that and stops accepting catalogues, add the key by hand. Open `private/config.php`, add the new public key as another line in `hub_keys`, keep the old keys, and run `php sync.php --verbose` to confirm. The hub operator tells you when this is needed.
+
+## Upgrade to a release with engines
+
+Releases from this one on also hold engine test builds, in `engines/`.
+
+1. Update the files. With `git pull`, `engines/` and its `.htaccess` arrive by themselves. Otherwise upload the `engines/` folder with its `.htaccess`.
+2. Let the web server and cron write to `engines/`, as for `maps/`.
+3. Run `php bin/check.php --url=https://mirror.example.org`.
+
+Until `https://<your mirror>/engines/` answers 200, the hub marks the mirror unhealthy and sends it no uploads or players.
 
 ## Set up by hand
 

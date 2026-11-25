@@ -1,4 +1,4 @@
-/* Styles the maps/ and games/ folder listings to match the Coilbox Hub's dark theme and homepage heading.
+/* Styles the maps/, games/ and engines/ folder listings to match the Coilbox Hub's dark theme and homepage heading.
    Apache links it from the .htaccess in those folders. The nginx example injects the same link. */
 
 :root {
