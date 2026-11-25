@@ -164,6 +164,111 @@ final class ListingTest extends TestCase
         }
     }
 
+    private const ENGINE = 'recoil_2026.09.03_arm64-macos.7z';
+
+    public function test_lists_engines_in_their_own_list(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->engines() . '/' . self::ENGINE, 'eee');
+            file_put_contents($paths->maps() . '/a.sd7', 'aaa');
+
+            $doc = Listing::build($paths, null, 1795000100);
+
+            $this->assertSame([['map', 'a.sd7']], array_map(static fn (array $f) => [$f['kind'], $f['filename']], $doc['files']));
+            $this->assertSame([['engine', self::ENGINE]], array_map(static fn (array $f) => [$f['kind'], $f['filename']], $doc['engines']));
+            $this->assertSame(hash('sha256', 'eee'), $doc['engines'][0]['sha256']);
+            $this->assertTrue(Listing::isValidDoc($doc));
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    public function test_skips_engine_folder_files_with_other_names(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            foreach (['RECOIL_1_arm64-macos.7z', 'notes.txt', 'x.sd7', '.htaccess'] as $name) {
+                file_put_contents($paths->engines() . '/' . $name, 'x');
+            }
+
+            $doc = Listing::build($paths, null, 1795000100);
+
+            $this->assertArrayNotHasKey('engines', $doc);
+            $this->assertSame([], $doc['files']);
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    public function test_no_engines_writes_no_engines_key(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->maps() . '/a.sd7', 'aaa');
+            Listing::write($paths, Listing::build($paths, null, 1795000100));
+
+            $this->assertStringNotContainsString('engines', file_get_contents($paths->listing()));
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    /** Mirrors on the previous release reject a listing whose files hold a kind they do not know. */
+    public function test_files_never_hold_an_engine_so_old_mirrors_accept_the_listing(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->engines() . '/' . self::ENGINE, 'eee');
+            file_put_contents($paths->games() . '/g.sdz', 'ggg');
+            Listing::write($paths, Listing::build($paths, null, 1795000100));
+
+            $doc = Json::decodeObject(file_get_contents($paths->listing()));
+            foreach ($doc['files'] as $file) {
+                $this->assertContains($file['kind'], ['map', 'game']);
+            }
+            $this->assertCount(1, $doc['engines']);
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    public function test_add_file_puts_an_engine_in_engines(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            file_put_contents($paths->maps() . '/a.sd7', 'aaa');
+            Listing::write($paths, Listing::build($paths, null, 1795000100));
+            file_put_contents($paths->engines() . '/' . self::ENGINE, 'eee');
+
+            Listing::addFile($paths, 'engine', self::ENGINE, 1795000300);
+
+            $doc = Listing::load($paths);
+            $this->assertSame(['a.sd7'], array_column($doc['files'], 'filename'));
+            $this->assertSame([self::ENGINE], array_column($doc['engines'], 'filename'));
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    public function test_entries_returns_files_then_engines(): void
+    {
+        $engine = self::entry(['kind' => 'engine', 'filename' => self::ENGINE]);
+        $doc = self::docWith([self::entry()]) + ['engines' => [$engine]];
+
+        $this->assertSame([self::entry(), $engine], Listing::entries($doc));
+        $this->assertSame([self::entry()], Listing::entries(self::docWith([self::entry()])));
+    }
+
+    public function test_find_finds_an_engine(): void
+    {
+        $engine = self::entry(['kind' => 'engine', 'filename' => self::ENGINE]);
+        $doc = self::docWith([self::entry()]) + ['engines' => [$engine]];
+
+        $this->assertSame($engine, Listing::find($doc, 'engine', self::ENGINE));
+        $this->assertNull(Listing::find($doc, 'map', self::ENGINE));
+    }
+
     /** @return array<string, mixed> */
     private static function entry(array $override = []): array
     {
@@ -198,6 +303,11 @@ final class ListingTest extends TestCase
             'upper case hash' => [self::docWith([self::entry(['sha256' => str_repeat('A', 64)])])],
             'hash with trailing newline' => [self::docWith([self::entry(['sha256' => str_repeat('a', 64) . "\n"])])],
             'float mtime' => [self::docWith([self::entry(['mtime' => 1.5])])],
+            'engine in files' => [self::docWith([self::entry(['kind' => 'engine', 'filename' => 'recoil_1_arm64-macos.7z'])])],
+            'map in engines' => [self::docWith([]) + ['engines' => [self::entry()]]],
+            'engines an object' => [self::docWith([]) + ['engines' => ['a' => self::entry(['kind' => 'engine', 'filename' => 'recoil_1_arm64-macos.7z'])]]],
+            'engine with a map filename' => [self::docWith([]) + ['engines' => [self::entry(['kind' => 'engine'])]]],
+            'engine with zero size' => [self::docWith([]) + ['engines' => [self::entry(['kind' => 'engine', 'filename' => 'recoil_1_arm64-macos.7z', 'size' => 0])]]],
             'missing mtime' => [self::docWith([['filename' => 'a.sd7', 'kind' => 'map', 'size' => 3, 'sha256' => str_repeat('a', 64)]])],
         ];
     }
@@ -221,6 +331,24 @@ final class ListingTest extends TestCase
             $doc = ['v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => $files];
             $this->assertTrue(Listing::isValidDoc($doc));
             $this->assertGreaterThanOrEqual(strlen(Json::encode($doc)), Listing::maxDocBytes($count));
+        }
+    }
+
+    public function test_max_doc_bytes_covers_listings_with_engines(): void
+    {
+        // The longest engine name the pattern allows. Its characters need no escaping.
+        $engine = 'recoil_' . str_repeat('1', 64) . '_amd64-windows.7z';
+        $map = str_repeat('"', 251) . '.sd7';
+        foreach ([[1, 0], [0, 1], [2, 3]] as [$maps, $engines]) {
+            $doc = ['v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => [], 'engines' => []];
+            for ($i = 0; $i < $maps; $i++) {
+                $doc['files'][] = ['filename' => $map, 'kind' => 'game', 'size' => PHP_INT_MAX, 'sha256' => str_repeat('f', 64), 'mtime' => PHP_INT_MAX];
+            }
+            for ($i = 0; $i < $engines; $i++) {
+                $doc['engines'][] = ['filename' => $engine, 'kind' => 'engine', 'size' => PHP_INT_MAX, 'sha256' => str_repeat('f', 64), 'mtime' => PHP_INT_MAX];
+            }
+            $this->assertTrue(Listing::isValidDoc($doc));
+            $this->assertGreaterThanOrEqual(strlen(Json::encode($doc)), Listing::maxDocBytes($maps + $engines));
         }
     }
 
