@@ -93,6 +93,12 @@ final class Requirements
                 . ($maps->status === 500 ? ' The likeliest cause is a host that does not let .htaccess files set Indexes options. Delete the Listing style lines in maps/.htaccess, games/.htaccess and engines/.htaccess to fall back to a plain listing.' : '');
         }
 
+        // The hub makes the same request when the mirror reports that it takes engines.
+        $engines = $h->get("$base/engines/")->status;
+        if ($engines !== 200) {
+            $problems[] = 'engines/ answered ' . self::describe($engines) . '. It must answer 200, or the hub marks the mirror unhealthy. Check that engines/.htaccess is on the server.';
+        }
+
         $sync = $h->get("$base/sync.php")->status;
         if ($sync !== 403) {
             $problems[] = 'sync.php answered ' . self::describe($sync) . '. It must answer 403 to web requests.';
