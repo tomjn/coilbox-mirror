@@ -56,7 +56,7 @@ DirectoryIndex index.html
 # ---------------------------------------------------------------
 # 4. Game archives download rather than render as text.
 # ---------------------------------------------------------------
-AddType application/octet-stream .7z .sd7 .sdz .sdd .sdf .sgc .tdf .chk .obj .patch
+AddType application/octet-stream .7z .sdfz .cbtrack .sd7 .sdz .sdd .sdf .sgc .tdf .chk .obj .patch
 AddType application/octet-stream .exe .dll .so .msi .gadget
 AddType application/x-7z-compressed .7z
 AddType application/zip .zip

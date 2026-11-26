@@ -69,6 +69,8 @@ final class RequirementsTest extends TestCase
         }
         $http->on(self::BASE . '/maps/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /maps</body></html>'));
         $http->on(self::BASE . '/engines/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /engines</body></html>'));
+        $http->on(self::BASE . '/replays/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /replays</body></html>'));
+        $http->on(self::BASE . '/tracks/', new HttpResponse(200, '<!DOCTYPE HTML><html><body>Index of /tracks</body></html>'));
         $http->on(self::BASE . '/sync.php', new HttpResponse(403, '{"error":"forbidden"}'));
         $http->on(self::BASE . '/limits.php', new HttpResponse(200, '{"v":1,"max_chunk_bytes":1048576}'));
         $http->on(self::BASE . '/upload.php', new HttpResponse(400, '{"error":"bad_request"}'));
@@ -239,6 +241,28 @@ final class RequirementsTest extends TestCase
             $this->assertCount(1, $problems, "status $status");
             $this->assertStringStartsWith('engines/ answered', $problems[0]);
             $this->assertStringContainsString('the hub marks the mirror unhealthy', $problems[0]);
+        }
+    }
+
+    public function test_missing_replay_and_track_folders_are_named(): void
+    {
+        rmdir($this->paths->replays());
+        rmdir($this->paths->tracks());
+        $this->assertSame(
+            ['replays/ is missing or not writable by the PHP user.', 'tracks/ is missing or not writable by the PHP user.'],
+            Requirements::local($this->paths, $this->ini(), $this->extensions()),
+        );
+    }
+
+    public function test_remote_flags_replay_and_track_folders_that_do_not_answer(): void
+    {
+        foreach (['replays', 'tracks'] as $folder) {
+            $http = $this->cleanRemote();
+            $http->on(self::BASE . "/$folder/", new HttpResponse(404, ''));
+            $this->assertSame(
+                ["$folder/ answered 404. It must answer 200, so players and the hub can reach the files. Check that $folder/.htaccess is on the server."],
+                Requirements::remote($http, self::BASE),
+            );
         }
     }
 

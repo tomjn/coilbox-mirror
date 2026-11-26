@@ -57,7 +57,11 @@ final class Requirements
 
         // private/state/ is made by the first request, so on a fresh install it is enough that private/ is writable.
         $state = is_dir($p->state()) || !is_dir($p->private()) ? $p->state() : $p->private();
-        $folders = ['maps/' => $p->maps(), 'games/' => $p->games(), 'engines/' => $p->engines(), '.partial/' => $p->partial(), 'private/state/' => $state];
+        $folders = [];
+        foreach (Paths::KINDS as $kind) {
+            $folders[Paths::folderFor($kind) . '/'] = $p->dirFor($kind);
+        }
+        $folders += ['.partial/' => $p->partial(), 'private/state/' => $state];
         foreach ($folders as $name => $dir) {
             if (!is_dir($dir) || !is_writable($dir)) {
                 $problems[] = "$name is missing or not writable by the PHP user.";
@@ -90,13 +94,20 @@ final class Requirements
         $maps = $h->get("$base/maps/");
         if ($maps->status !== 200 || preg_match('/<html|<!doctype/i', $maps->body) !== 1) {
             $problems[] = 'maps/ answered ' . self::describe($maps->status) . ' without an HTML page. It must answer 200 with a page that lists the archives.'
-                . ($maps->status === 500 ? ' The likeliest cause is a host that does not let .htaccess files set Indexes options. Delete the Listing style lines in maps/.htaccess, games/.htaccess and engines/.htaccess to fall back to a plain listing.' : '');
+                . ($maps->status === 500 ? ' The likeliest cause is a host that does not let .htaccess files set Indexes options. Delete the Listing style lines in the .htaccess files of maps/, games/, engines/, replays/ and tracks/ to fall back to a plain listing.' : '');
         }
 
         // The hub makes the same request when the mirror reports that it takes engines.
         $engines = $h->get("$base/engines/")->status;
         if ($engines !== 200) {
             $problems[] = 'engines/ answered ' . self::describe($engines) . '. It must answer 200, or the hub marks the mirror unhealthy. Check that engines/.htaccess is on the server.';
+        }
+
+        foreach (['replays', 'tracks'] as $folder) {
+            $status = $h->get("$base/$folder/")->status;
+            if ($status !== 200) {
+                $problems[] = "$folder/ answered " . self::describe($status) . ". It must answer 200, so players and the hub can reach the files. Check that $folder/.htaccess is on the server.";
+            }
         }
 
         $sync = $h->get("$base/sync.php")->status;
