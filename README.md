@@ -183,6 +183,8 @@ Until `https://<your mirror>/engines/` answers 200, the hub marks the mirror unh
 
 Releases from this one on also hold match replays in `replays/` and replay tracks in `tracks/`.
 
+You must upgrade every mirror on an earlier release, because it stops copying files from an upgraded mirror once that mirror holds many replays.
+
 1. Update the files, including the root `.htaccess`. With `git pull`, the two folders and their `.htaccess` files arrive by themselves. Otherwise upload the `replays/` and `tracks/` folders with their `.htaccess` files.
 2. Let the web server and cron write to both folders, as for `maps/`.
 3. On nginx, add `replays` and `tracks` to the folder `location` in your site config, as in `examples/nginx.conf`, then reload nginx.
