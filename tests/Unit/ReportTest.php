@@ -75,7 +75,7 @@ final class ReportTest extends TestCase
             'catalogue_generated_at' => 1795000000,
             'held' => [self::NEW, self::KNOWN],
             'unknown' => [['filename' => 'new.sd7', 'kind' => 'map', 'size' => 123, 'sha256' => self::NEW]],
-            'kinds' => ['map', 'game', 'engine'],
+            'kinds' => ['map', 'game', 'engine', 'replay', 'track'],
         ], Json::decodeObject($json));
     }
 
@@ -83,7 +83,7 @@ final class ReportTest extends TestCase
     {
         $doc = Json::decodeObject(Report::payload($this->config(), null, $this->listing(), 'sync', null, 1795000002));
         $this->assertSame(['unknown', 'kinds'], array_slice(array_keys($doc), -2));
-        $this->assertSame(['map', 'game', 'engine'], $doc['kinds']);
+        $this->assertSame(['map', 'game', 'engine', 'replay', 'track'], $doc['kinds']);
     }
 
     private const ENGINE = 'recoil_2026.09.03_arm64-macos.7z';

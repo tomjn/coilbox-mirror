@@ -217,8 +217,10 @@ final class Sync
         if ($held === null) {
             return;
         }
-        foreach (Catalogue::engines($held)[1] as $line) {
-            $this->log($line);
+        foreach (Paths::OWN_LIST_KINDS as $kind) {
+            foreach (Catalogue::ownList($held, $kind)[1] as $line) {
+                $this->log($line);
+            }
         }
         $wanted = Catalogue::wanted($held);
         $own = Listing::load($this->paths) ?? Listing::build($this->paths, null, ($this->now)());
@@ -265,8 +267,7 @@ final class Sync
     /** @return array<string, array> each usable peer's listing, keyed by base URL */
     private function peerListings(array $mirrors, int $archiveCount): array
     {
-        // Policy: a peer listing may hold as many unknown files as there are catalogue archives and engines, so
-        // the factor is 2.
+        // Policy: a peer listing may hold as many unknown files as the catalogue lists files, so the factor is 2.
         $cap = Listing::maxDocBytes(2 * $archiveCount + 1);
         $listings = [];
         foreach ($mirrors as $peer) {

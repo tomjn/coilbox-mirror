@@ -72,7 +72,7 @@ final class CatalogueTest extends TestCase
 
     public function test_valid_engines_get_the_engine_kind(): void
     {
-        [$engines, $dropped] = Catalogue::engines(self::doc() + ['engines' => [self::engine()]]);
+        [$engines, $dropped] = Catalogue::ownList(self::doc() + ['engines' => [self::engine()]], 'engine');
         $this->assertSame([self::engine() + ['kind' => 'engine']], $engines);
         $this->assertSame([], $dropped);
     }
@@ -90,7 +90,7 @@ final class CatalogueTest extends TestCase
             $missingName,
         ]];
 
-        [$engines, $dropped] = Catalogue::engines($doc);
+        [$engines, $dropped] = Catalogue::ownList($doc, 'engine');
 
         $this->assertSame([self::engine() + ['kind' => 'engine']], $engines);
         $this->assertSame([
@@ -105,7 +105,7 @@ final class CatalogueTest extends TestCase
     public function test_an_engine_is_always_the_engine_kind(): void
     {
         foreach (['x', 'game', 'map'] as $kind) {
-            [$engines] = Catalogue::engines(self::doc() + ['engines' => [self::engine(['kind' => $kind])]]);
+            [$engines] = Catalogue::ownList(self::doc() + ['engines' => [self::engine(['kind' => $kind])]], 'engine');
             $this->assertSame('engine', $engines[0]['kind']);
         }
     }
@@ -113,13 +113,13 @@ final class CatalogueTest extends TestCase
     public function test_engines_that_is_not_a_list_drops_them_all(): void
     {
         foreach ([['a' => self::engine()], 'x', 5] as $bad) {
-            $this->assertSame([[], ['catalogue engines list dropped, malformed']], Catalogue::engines(self::doc() + ['engines' => $bad]));
+            $this->assertSame([[], ['catalogue engines list dropped, malformed']], Catalogue::ownList(self::doc() + ['engines' => $bad], 'engine'));
         }
     }
 
     public function test_no_engines_key_gives_no_engines_and_no_lines(): void
     {
-        $this->assertSame([[], []], Catalogue::engines(self::doc()));
+        $this->assertSame([[], []], Catalogue::ownList(self::doc(), 'engine'));
     }
 
     public function test_a_catalogue_with_a_bad_engine_still_verifies(): void
@@ -133,6 +133,40 @@ final class CatalogueTest extends TestCase
     {
         $doc = self::doc() + ['engines' => [self::engine(), self::engine(['size' => 0])]];
         $this->assertSame([$doc['archives'][0], self::engine() + ['kind' => 'engine']], Catalogue::wanted($doc));
+    }
+
+    /** @return array<string, array{string, string, string}> kind, list key and filename */
+    public static function replayKinds(): array
+    {
+        return [
+            'replay' => ['replay', 'replays', '0123456789abcdef0123456789abcdef.sdfz'],
+            'track' => ['track', 'tracks', '0123456789abcdef0123456789abcdef.cbtrack'],
+        ];
+    }
+
+    #[DataProvider('replayKinds')]
+    public function test_each_list_sets_its_own_kind_and_drops_bad_entries(string $kind, string $key, string $name): void
+    {
+        $good = ['filename' => $name, 'sha256' => str_repeat('b', 64), 'size' => 456];
+        $doc = self::doc() + [$key => [['filename' => 'x.sd7'] + $good, ['kind' => 'map'] + $good]];
+
+        $this->assertSame(
+            [[['kind' => $kind] + $good], ["catalogue $kind entry 0 dropped, malformed"]],
+            Catalogue::ownList($doc, $kind),
+        );
+        $this->assertSame([$doc['archives'][0], ['kind' => $kind] + $good], Catalogue::wanted($doc));
+        $this->assertSame([[], ["catalogue $key list dropped, malformed"]], Catalogue::ownList(self::doc() + [$key => 'x'], $kind));
+    }
+
+    #[DataProvider('replayKinds')]
+    public function test_archives_cannot_hold_a_replay_or_track(string $kind, string $key, string $name): void
+    {
+        $hub = Signer::keypair(1);
+        $doc = self::doc();
+        $doc['archives'][0] = ['kind' => $kind, 'filename' => $name] + $doc['archives'][0];
+        [$json, $sig] = $this->signed($doc, $hub['secret']);
+
+        $this->assertRejected('malformed', fn () => Catalogue::verify($json, $sig, [$hub['public']], null));
     }
 
     public function test_one_changed_byte_is_bad_signature(): void

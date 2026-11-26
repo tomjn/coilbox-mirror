@@ -76,17 +76,19 @@ The payload has exactly these eight keys. A missing key or an extra key makes th
 | `upload` | string | 1 to 64 characters from `A-Z a-z 0-9 -`. Unique for each upload. |
 | `sha256` | string | 64 lowercase hex characters. The SHA-256 of the whole file. |
 | `size` | integer | The file size in bytes. At least 1. |
-| `filename` | string | A valid archive filename, see below. |
-| `kind` | string | `map` or `game`. |
+| `filename` | string | A valid filename for the kind, see below. |
+| `kind` | string | `map`, `game`, `engine`, `replay` or `track`. |
 | `start_by` | integer | The last second at which the first chunk may arrive. |
 
-### Archive filenames
+### Filenames
 
-A valid filename is valid UTF-8, 1 to 255 bytes long, and ends in `.sd7` or `.sdz` in any letter case. It does not start with a dot. It contains no `/`, no `\`, no NUL, no control character (Unicode category Cc, which includes DEL and the C1 controls), no format character (category Cf, such as U+202E RIGHT-TO-LEFT OVERRIDE, U+200B ZERO WIDTH SPACE and U+FEFF), and no line or paragraph separator (categories Zl and Zp, U+2028 and U+2029). Format characters are invisible and can make a directory listing show a fake extension. The hub must apply the same rule. Spaces, parentheses, extra dots and non-ASCII letters are fine. The mirror stores the name unchanged.
+A valid archive filename, for `map` and `game`, is valid UTF-8, 1 to 255 bytes long, and ends in `.sd7` or `.sdz` in any letter case. It does not start with a dot. It contains no `/`, no `\`, no NUL, no control character (Unicode category Cc, which includes DEL and the C1 controls), no format character (category Cf, such as U+202E RIGHT-TO-LEFT OVERRIDE, U+200B ZERO WIDTH SPACE and U+FEFF), and no line or paragraph separator (categories Zl and Zp, U+2028 and U+2029). Format characters are invisible and can make a directory listing show a fake extension. The hub must apply the same rule. Spaces, parentheses, extra dots and non-ASCII letters are fine. The mirror stores the name unchanged.
 
 An `engine` filename follows a stricter rule instead. It matches `recoil_<version>_<platform>.7z` exactly, in this letter case. `<version>` is 1 to 64 characters from `0-9`, `A-Z`, `a-z`, `.`, `+` and `-`, and starts with a letter or digit. `<platform>` is `amd64-linux`, `amd64-windows` or `arm64-macos`. This is the name of an official Recoil release, so the hub reads the version and platform from it. The hub applies the same rule.
 
-A kind decides the folder. `map` files live in `maps/`, `game` files live in `games/` and `engine` files live in `engines/`. The token's `kind` is one of these three, and its `filename` must be valid for that kind.
+A `replay` filename is the engine's game id as exactly 32 characters from `0-9` and `a-f`, followed by `.sdfz`. A `track` filename is the same id followed by `.cbtrack`. Both are lower case only, so every copy of a match has the same name on every mirror. The game id is the 16 bytes in the replay's header, written in hex. The hub applies the same rule. The mirror does not open the file, so it does not check that the id matches the contents.
+
+A kind decides the folder. `map` files live in `maps/`, `game` files in `games/`, `engine` files in `engines/`, `replay` files in `replays/` and `track` files in `tracks/`. The token's `kind` is one of these five, and its `filename` must be valid for that kind.
 
 ### Check order
 
@@ -175,7 +177,7 @@ When the last chunk arrives, the mirror takes the disk lock and does this.
 
 1. Hash the partial file. If the hash is not the token's `sha256`, delete the partial and answer `hash_mismatch`. The uploader must start again from offset 0.
 2. List the target folder. If any entry has the same name in any letter case, delete the partial and answer `exists`. This holds even when the bytes are the same. The hub treats names as equal ignoring case, so the mirror does too.
-3. Move the file into `maps/` or `games/` under its original name.
+3. Move the file into the kind's folder under its original name.
 4. Record the upload id as used.
 5. Add the file to `listing.json` (section 5) and send an `upload` report to the hub (section 7). A failure in this step does not fail the upload.
 
@@ -239,7 +241,7 @@ Fixture: `fixtures/limits.json`, made from `upload_max_filesize` and `post_max_s
 
 ## 5. listing.json
 
-Each mirror keeps `listing.json` at its root, next to `upload.php`. It lists every archive on disk. The hub and peer mirrors read it over HTTP at `{base_url}/listing.json`.
+Each mirror keeps `listing.json` at its root, next to `upload.php`. It lists every file of every kind on disk. The hub and peer mirrors read it over HTTP at `{base_url}/listing.json`.
 
 ### Format
 
@@ -248,6 +250,10 @@ Each mirror keeps `listing.json` at its root, next to `upload.php`. It lists eve
   {"filename": "Test Game v1.sdz", "kind": "game", "size": 39, "sha256": "e0923c55...", "mtime": 1794780000}
 ], "engines": [
   {"filename": "recoil_2026.09.03_arm64-macos.7z", "kind": "engine", "size": 41, "sha256": "5d1e0a8f...", "mtime": 1794780000}
+], "replays": [
+  {"filename": "9f2c4b1ad07e5386c1f4a92b6e8d0375.sdfz", "kind": "replay", "size": 42, "sha256": "77ab12c4...", "mtime": 1794780000}
+], "tracks": [
+  {"filename": "9f2c4b1ad07e5386c1f4a92b6e8d0375.cbtrack", "kind": "track", "size": 43, "sha256": "c019be55...", "mtime": 1794780000}
 ]}
 ```
 
@@ -257,25 +263,27 @@ Each mirror keeps `listing.json` at its root, next to `upload.php`. It lists eve
 | `generated_at` | integer | When the mirror wrote the document. |
 | `files` | list | One entry for each map and game. May be empty. |
 | `engines` | list | One entry for each engine. Left out when there are none. |
+| `replays` | list | One entry for each replay. Left out when there are none. |
+| `tracks` | list | One entry for each track. Left out when there are none. |
 
-Engines have their own list because mirrors on releases before engines reject a whole listing when one entry in `files` has a kind they do not know. They ignore unknown top-level keys, so they still read the maps and games of a mirror that holds engines.
+Engines, replays and tracks each have their own list because earlier releases reject a whole listing when one entry in a list they read has a kind they do not know. They ignore unknown top-level keys, so they still read the maps and games of a mirror that holds newer kinds. The peer listing size cap below still applies to them.
 
-Each entry in `files` and `engines` has these keys.
+Each entry in every list has these keys.
 
 | Key | Type | Rule |
 | --- | --- | --- |
 | `filename` | string | A valid filename for its kind (section 2). |
-| `kind` | string | `map` or `game` in `files`. `engine` in `engines`. |
+| `kind` | string | `map` or `game` in `files`. `engine` in `engines`, `replay` in `replays` and `track` in `tracks`. |
 | `size` | integer | At least 1. |
 | `sha256` | string | 64 lowercase hex characters. |
 | `mtime` | integer | The file's modification time. |
 
 ### How the mirror builds it
 
-- It scans `maps/`, `games/` and `engines/`, one level deep. Subfolders are not read.
+- It scans `maps/`, `games/`, `engines/`, `replays/` and `tracks/`, one level deep. Subfolders are not read.
 - It lists a regular file only if its name is valid for the folder's kind.
 - It leaves out zero byte files. No real archive is empty, and one entry with `size` 0 would make the whole document invalid. A zero byte file never appears in a listing, so it never shows as unknown in a report.
-- It sorts entries by `kind` and then by `filename` in byte order, and puts engines in `engines`.
+- It sorts entries by `kind` and then by `filename` in byte order, and puts engines, replays and tracks in their own lists.
 - It reuses a stored `sha256` when a file's size and `mtime` are unchanged, and hashes the file otherwise.
 
 The mirror rewrites the listing at the start and end of every sync, adds a file as soon as an upload or a peer download finishes, and drops a file as soon as a removal deletes it. A listing on disk that fails the rules below counts as missing, and the mirror rebuilds it.
@@ -288,7 +296,7 @@ The mirror calls a listing valid, and so usable, only when all of these hold. Pe
 - `v` is the integer `1`.
 - `generated_at` is an integer.
 - `files` is a list, meaning a JSON array. It may be empty.
-- `engines`, when present, is a list.
+- `engines`, `replays` and `tracks`, when present, are lists.
 - Every entry is an object whose `filename`, `kind`, `size`, `sha256` and `mtime` follow the table above.
 
 Unknown keys, at the top level or in an entry, are allowed. One bad entry makes the whole document invalid, and the mirror then ignores the whole document.
@@ -297,15 +305,15 @@ Unknown keys, at the top level or in an entry, are allowed. One bad entry makes 
 
 During a sync, a mirror downloads each peer's `listing.json` to find who holds a missing archive. It reads at most a set number of bytes and skips a peer whose document is longer.
 
-The cap is the largest document that can hold `2 x A + 1` entries, where `A` is the number of archives and usable engines in the held catalogue. It comes from `Listing::maxDocBytes`. That function counts a 255 byte filename in which every byte takes 6 bytes of JSON escaping, the longest kind, 19 digit integers and a 64 character hash. Each entry costs at most 1693 bytes and the document wrapper, with an `engines` list, costs 66 bytes. For a catalogue of 2 archives the cap is 8531 bytes.
+The cap is the largest document that can hold `2 x A + 1` entries, where `A` is the number of archives and usable engines, replays and tracks in the held catalogue. It comes from `Listing::maxDocBytes`. That function counts a 255 byte filename in which every byte takes 6 bytes of JSON escaping, the longest kind, 19 digit integers and a 64 character hash. Each entry costs at most 1693 bytes and the document wrapper, with every list, costs 91 bytes. For a catalogue of 2 archives the cap is 8556 bytes.
 
-The policy behind the factor of 2 is that a peer's listing may hold as many unknown files as there are catalogue archives. A peer that has uploaded more fresh files than that, which the catalogue does not list yet, is skipped, with a log line, until the catalogue catches up. A peer over the cap, or with a missing or invalid listing, never stops the sync. The mirror moves on to the next peer.
+The policy behind the factor of 2 is that a peer's listing may hold as many unknown files as the catalogue lists files. A mirror on a release before replays does not count the catalogue's replays and tracks in `A`, but a newer peer's listing holds them, so it skips that peer once they push the listing over its cap. A peer that has uploaded more fresh files than that, which the catalogue does not list yet, is skipped, with a log line, until the catalogue catches up. A peer over the cap, or with a missing or invalid listing, never stops the sync. The mirror moves on to the next peer.
 
 Fixture: `fixtures/listing.json`.
 
 ## 6. Catalogue and signature
 
-The catalogue is the hub's signed list of mirrors, archives, engines and removals. The hub serves two files.
+The catalogue is the hub's signed list of mirrors, archives, engines, replays, tracks and removals. The hub serves two files.
 
 - `GET {hub_url}/api/v1/catalogue` returns the catalogue JSON.
 - `GET {hub_url}/api/v1/catalogue.sig` returns the base64url signature, with no trailing newline.
@@ -336,11 +344,13 @@ When fetching archives, a mirror tries peers in a random order chosen once per s
   "removed":  [{"sha256": "...", "filename": "...", "reason": "...", "removed_at": 1794700800}],
   "engines":  [{"filename": "recoil_2026.09.03_arm64-macos.7z", "sha256": "...", "size": 41,
                 "version": "2026.09.03", "platform": "arm64-macos", "note": "..."}],
+  "replays":  [{"filename": "9f2c4b1ad07e5386c1f4a92b6e8d0375.sdfz", "sha256": "...", "size": 42}],
+  "tracks":   [{"filename": "9f2c4b1ad07e5386c1f4a92b6e8d0375.cbtrack", "sha256": "...", "size": 43}],
   "next_key": {"public_key": "...", "sig": "..."}
 }
 ```
 
-`engines` and `next_key` are optional. The other keys are required. The hub leaves `engines` out when it lists none.
+`engines`, `replays`, `tracks` and `next_key` are optional. The other keys are required. The hub leaves a list out when it has nothing to put in it.
 
 ### Shape rules
 
@@ -356,7 +366,7 @@ Top level:
 Each `mirrors` entry:
 
 - `id` matches the mirror id rule in section 1.
-- `base_url` starts with `http://` or `https://`, has a host, may have a path, has no query, no fragment, no whitespace and no trailing slash. Mirrors are expected at the domain root, and the shipped `.htaccess` assumes it. A mirror in a subfolder works only if its operator edits the path in that file. The mirror reaches its peers at `{base_url}/catalogue.json`, `{base_url}/listing.json`, and `{base_url}/maps/<name>`, `{base_url}/games/<name>` or `{base_url}/engines/<name>` for archives. `<name>` is the filename percent-encoded with PHP's `rawurlencode`, so `Test Map (v1.2) é.sd7` becomes `Test%20Map%20%28v1.2%29%20%C3%A9.sd7`.
+- `base_url` starts with `http://` or `https://`, has a host, may have a path, has no query, no fragment, no whitespace and no trailing slash. Mirrors are expected at the domain root, and the shipped `.htaccess` assumes it. A mirror in a subfolder works only if its operator edits the path in that file. The mirror reaches its peers at `{base_url}/catalogue.json`, `{base_url}/listing.json`, and `{base_url}/<folder>/<name>` for files, where `<folder>` is the kind's folder (section 2). `<name>` is the filename percent-encoded with PHP's `rawurlencode`, so `Test Map (v1.2) é.sd7` becomes `Test%20Map%20%28v1.2%29%20%C3%A9.sd7`.
 - `public_key` is base64url and decodes to 32 bytes.
 
 Each `archives` entry:
@@ -375,15 +385,15 @@ Each `removed` entry:
 - `reason` is a string.
 - `removed_at` is an integer.
 
-`engines` is not part of the shape check, so a bad engine never rejects a catalogue. The mirror checks each entry on its own when it syncs and reports, and uses only the entries that pass:
+`engines`, `replays` and `tracks` are not part of the shape check, so a bad entry in them never rejects a catalogue. The mirror checks each entry on its own when it syncs and reports, and uses only the entries that pass:
 
-- `filename` is a valid engine filename (section 2).
+- `filename` is a valid filename for the list's kind (section 2).
 - `sha256` is 64 lowercase hex characters.
 - `size` is an integer of at least 1.
 
-The mirror does not use `version`, `platform` or `note`, so it does not check them. It drops a bad entry and logs `catalogue engine entry <index> dropped, malformed`, counting from 0. If `engines` is not a list, it drops them all and logs `catalogue engines list dropped, malformed`. Maps and games sync as usual either way. Mirrors on releases before engines ignore `engines`.
+The mirror uses no other field, such as an engine's `version`, `platform` or `note`, so it does not check them. It drops a bad entry and logs `catalogue <kind> entry <index> dropped, malformed`, counting from 0, for example `catalogue replay entry 0 dropped, malformed`. If one of these keys is not a list, it drops that whole list and logs, for example, `catalogue replays list dropped, malformed`. Everything else syncs as usual. Mirrors on earlier releases ignore the lists they do not know.
 
-Engine removals go in `removed` like any other. A mirror on a release before engines never looks in `engines/`, so they change nothing there.
+Engine, replay and track removals go in `removed` like any other. A mirror on a release that does not know a kind never looks in its folder, so they change nothing there.
 
 Unknown keys are allowed, at the top level and inside entries. The hub can add fields without breaking mirrors. Because the whole document is signed, a mirror cannot act on an unsigned extra field.
 
@@ -457,12 +467,12 @@ The hub verifies `sig` over the decoded payload bytes with the public key it has
 | `catalogue_seq` | integer or null | The `seq` of the catalogue the mirror holds. `null` if it holds none. |
 | `catalogue_generated_at` | integer or null | The `generated_at` of that catalogue, or `null`. |
 | `held` | list of strings | The SHA-256 of every file in the mirror's listing. Each hash appears once, sorted as plain strings. |
-| `unknown` | list of objects | Every listed file whose hash is not in the held catalogue's `archives` or usable `engines`. |
-| `kinds` | list of strings | The kinds the mirror takes, always `["map", "game", "engine"]`. Mirrors on releases before engines leave it out. |
+| `unknown` | list of objects | Every listed file whose hash is not in the held catalogue's `archives` or usable `engines`, `replays` and `tracks`. |
+| `kinds` | list of strings | The kinds the mirror takes, always `["map", "game", "engine", "replay", "track"]`. Mirrors on releases before engines leave it out. |
 
 Each `unknown` entry has `filename`, `kind`, `size` and `sha256`, taken from the listing. A file counts as known by its hash alone, so the same bytes under another name are not unknown.
 
-The hub only sends engine uploads to mirrors whose last report had `engine` in `kinds`. When a report has `engine` in `kinds`, the hub also requests `{base_url}/engines/`, without following redirects, as part of its health check. Unless that answers `200`, the hub marks the mirror unhealthy, and it gets no uploads or download links until a later report passes. So a mirror upgraded without its `engines/` folder stops serving players until its operator adds the folder.
+The hub only sends engine, replay and track uploads to mirrors whose last report had that kind in `kinds`. When a report has `engine` in `kinds`, the hub also requests `{base_url}/engines/`, without following redirects, as part of its health check. Unless that answers `200`, the hub marks the mirror unhealthy, and it gets no uploads or download links until a later report passes. So a mirror upgraded without its `engines/` folder stops serving players until its operator adds the folder.
 
 An empty `held` or `unknown` list is `[]`. A mirror with no catalogue yet reports every file as unknown.
 

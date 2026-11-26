@@ -9,12 +9,18 @@ final class Filename
     /** Engine builds use the name of an official Recoil release, so the hub can read the version and platform from it. */
     private const ENGINE = '/\\Arecoil_[0-9A-Za-z][0-9A-Za-z.+-]{0,63}_(?:amd64-linux|amd64-windows|arm64-macos)\\.7z\\z/';
 
+    /** The engine's 16 byte game id in lower case hex, so every copy of a match has one name. */
+    private const REPLAY = '/\\A[0-9a-f]{32}\\.sdfz\\z/';
+    private const TRACK = '/\\A[0-9a-f]{32}\\.cbtrack\\z/';
+
     /** Checks a name against the rules for its kind. Maps and games use isValid. An unknown kind is never valid. */
     public static function isValidFor(string $kind, string $name): bool
     {
         return match ($kind) {
             'map', 'game' => self::isValid($name),
             'engine' => preg_match(self::ENGINE, $name) === 1,
+            'replay' => preg_match(self::REPLAY, $name) === 1,
+            'track' => preg_match(self::TRACK, $name) === 1,
             default => false,
         };
     }

@@ -44,48 +44,54 @@ final class Catalogue
     }
 
     /**
-     * Returns the engines the mirror should hold, each with kind "engine", and one log line for each entry
-     * dropped. Each entry is checked on its own, so one bad engine does not stop maps and games syncing.
-     * Only the fields the mirror uses are checked.
+     * Returns the entries of one kind's own list that the mirror should hold, each with that kind, and one log
+     * line for each entry dropped. Each entry is checked on its own, so one bad engine, replay or track does not
+     * stop the rest syncing. Only the fields the mirror uses are checked.
      *
      * @param array<string, mixed> $doc a catalogue that verify() accepted
+     * @param string $kind one of Paths::OWN_LIST_KINDS
      * @return array{0: list<array<string, mixed>>, 1: list<string>}
      */
-    public static function engines(array $doc): array
+    public static function ownList(array $doc, string $kind): array
     {
-        if (!array_key_exists('engines', $doc)) {
+        $key = Paths::folderFor($kind);
+        if (!array_key_exists($key, $doc)) {
             return [[], []];
         }
-        if (!is_array($doc['engines']) || !array_is_list($doc['engines'])) {
-            return [[], ['catalogue engines list dropped, malformed']];
+        if (!is_array($doc[$key]) || !array_is_list($doc[$key])) {
+            return [[], ["catalogue $key list dropped, malformed"]];
         }
-        $engines = [];
+        $entries = [];
         $dropped = [];
-        foreach ($doc['engines'] as $i => $e) {
+        foreach ($doc[$key] as $i => $e) {
             if (
                 is_array($e)
-                && is_string($e['filename'] ?? null) && Filename::isValidFor('engine', $e['filename'])
+                && is_string($e['filename'] ?? null) && Filename::isValidFor($kind, $e['filename'])
                 && self::validHash($e['sha256'] ?? null)
                 && is_int($e['size'] ?? null) && $e['size'] >= 1
             ) {
                 // The kind is set here, so an entry cannot name another folder.
-                $engines[] = array_merge($e, ['kind' => 'engine']);
+                $entries[] = array_merge($e, ['kind' => $kind]);
             } else {
-                $dropped[] = "catalogue engine entry $i dropped, malformed";
+                $dropped[] = "catalogue $kind entry $i dropped, malformed";
             }
         }
-        return [$engines, $dropped];
+        return [$entries, $dropped];
     }
 
     /**
-     * Returns every archive and engine the mirror should hold.
+     * Returns every file the mirror should hold: the archives, then each own list.
      *
      * @param array<string, mixed> $doc a catalogue that verify() accepted
      * @return list<array<string, mixed>>
      */
     public static function wanted(array $doc): array
     {
-        return [...$doc['archives'], ...self::engines($doc)[0]];
+        $wanted = $doc['archives'];
+        foreach (Paths::OWN_LIST_KINDS as $kind) {
+            $wanted = [...$wanted, ...self::ownList($doc, $kind)[0]];
+        }
+        return $wanted;
     }
 
     /**

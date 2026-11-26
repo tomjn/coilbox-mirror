@@ -269,6 +269,45 @@ final class ListingTest extends TestCase
         $this->assertNull(Listing::find($doc, 'map', self::ENGINE));
     }
 
+    public function test_replays_and_tracks_get_their_own_lists(): void
+    {
+        $paths = TempMirror::create();
+        try {
+            $id = str_repeat('a1', 16);
+            file_put_contents($paths->maps() . '/a.sd7', 'aaa');
+            file_put_contents($paths->replays() . "/$id.sdfz", 'rrr');
+            file_put_contents($paths->tracks() . "/$id.cbtrack", 'ttt');
+            file_put_contents($paths->replays() . '/notes.txt', 'x');
+            file_put_contents($paths->tracks() . "/$id.sdfz", 'x');
+
+            Listing::write($paths, Listing::build($paths, null, 1795000100));
+            $doc = Listing::load($paths);
+
+            $this->assertSame(['v', 'generated_at', 'files', 'replays', 'tracks'], array_keys($doc));
+            $this->assertSame(['a.sd7'], array_column($doc['files'], 'filename'));
+            $this->assertSame(["$id.sdfz"], array_column($doc['replays'], 'filename'));
+            $this->assertSame(["$id.cbtrack"], array_column($doc['tracks'], 'filename'));
+            $this->assertCount(3, Listing::entries($doc));
+            $this->assertSame('track', Listing::find($doc, 'track', "$id.cbtrack")['kind']);
+        } finally {
+            TempMirror::destroy($paths);
+        }
+    }
+
+    public function test_max_doc_bytes_covers_listings_with_replays_and_tracks(): void
+    {
+        $id = str_repeat('f', 32);
+        $entry = static fn (string $kind, string $name): array => ['filename' => $name, 'kind' => $kind, 'size' => PHP_INT_MAX, 'sha256' => str_repeat('f', 64), 'mtime' => PHP_INT_MAX];
+        $doc = [
+            'v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => [], 'engines' => [],
+            'replays' => [$entry('replay', "$id.sdfz")],
+            'tracks' => [$entry('track', "$id.cbtrack")],
+        ];
+
+        $this->assertTrue(Listing::isValidDoc($doc));
+        $this->assertGreaterThanOrEqual(strlen(Json::encode($doc)), Listing::maxDocBytes(2));
+    }
+
     /** @return array<string, mixed> */
     private static function entry(array $override = []): array
     {
@@ -308,6 +347,10 @@ final class ListingTest extends TestCase
             'engines an object' => [self::docWith([]) + ['engines' => ['a' => self::entry(['kind' => 'engine', 'filename' => 'recoil_1_arm64-macos.7z'])]]],
             'engine with a map filename' => [self::docWith([]) + ['engines' => [self::entry(['kind' => 'engine'])]]],
             'engine with zero size' => [self::docWith([]) + ['engines' => [self::entry(['kind' => 'engine', 'filename' => 'recoil_1_arm64-macos.7z', 'size' => 0])]]],
+            'replay in files' => [self::docWith([self::entry(['kind' => 'replay', 'filename' => str_repeat('a', 32) . '.sdfz'])])],
+            'track in replays' => [self::docWith([]) + ['replays' => [self::entry(['kind' => 'track', 'filename' => str_repeat('a', 32) . '.cbtrack'])]]],
+            'replay with a map filename' => [self::docWith([]) + ['replays' => [self::entry(['kind' => 'replay'])]]],
+            'tracks an object' => [self::docWith([]) + ['tracks' => ['a' => 1]]],
             'missing mtime' => [self::docWith([['filename' => 'a.sd7', 'kind' => 'map', 'size' => 3, 'sha256' => str_repeat('a', 64)]])],
         ];
     }

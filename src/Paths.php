@@ -6,7 +6,13 @@ namespace Mirror;
 
 final class Paths
 {
-    public const KINDS = ['map', 'game', 'engine'];
+    public const KINDS = ['map', 'game', 'engine', 'replay', 'track'];
+
+    /**
+     * Kinds with their own top-level list, named as their folder is, in the listing and the catalogue.
+     * Mirrors on earlier releases reject any kind they do not know inside the shared lists.
+     */
+    public const OWN_LIST_KINDS = ['engine', 'replay', 'track'];
 
     private readonly string $root;
 
@@ -35,6 +41,16 @@ final class Paths
         return $this->root . '/engines';
     }
 
+    public function replays(): string
+    {
+        return $this->root . '/replays';
+    }
+
+    public function tracks(): string
+    {
+        return $this->root . '/tracks';
+    }
+
     /** Returns the folder name for a kind, relative to the root. */
     public static function folderFor(string $kind): string
     {
@@ -42,6 +58,8 @@ final class Paths
             'map' => 'maps',
             'game' => 'games',
             'engine' => 'engines',
+            'replay' => 'replays',
+            'track' => 'tracks',
             default => throw new \InvalidArgumentException("Unknown kind: $kind"),
         };
     }
