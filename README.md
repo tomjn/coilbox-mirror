@@ -1,6 +1,6 @@
 # Coilbox mirror
 
-A mirror stores Recoil map and game archives, and engine test builds, and serves them over plain HTTP. Players download from it, and the Coilbox hub decides who may upload to it.
+A mirror stores Recoil map and game archives, engine test builds, match replays and replay tracks, and serves them over plain HTTP. Players download from it, and the Coilbox hub decides who may upload to it.
 
 The hub is a separate website. It keeps a signed catalogue of every archive and every mirror. Each mirror stores a copy of that catalogue and checks its signature with the hub's public keys. A mirror also copies files from the other mirrors listed in the catalogue, so mirrors keep syncing with each other if the hub goes away.
 
@@ -50,6 +50,8 @@ Anyone can offer a mirror. The hub only sends players and uploads to mirrors it 
    - `maps/`
    - `games/`
    - `engines/`
+   - `replays/`
+   - `tracks/`
    - `.partial/`
 
    Keep these off the server: `vendor/`, `tests/`, `fixtures/`, `composer.json`, `composer.lock`, `phpunit.xml.dist` and `.git`. `PROTOCOL.md` and this README are optional.
@@ -124,7 +126,7 @@ DreamHost users can add the job in the panel's cron section. Enter the same comm
 
 ## Put your name on the listing pages
 
-The `maps/`, `games/` and `engines/` pages list every archive. They carry the Coilbox Hub heading, a link back to the hub and a line thanking you for hosting the mirror.
+The `maps/`, `games/`, `engines/`, `replays/` and `tracks/` pages list every file. They carry the Coilbox Hub heading, a link back to the hub and a line thanking you for hosting the mirror.
 
 Copy `listing-header.sample.html` to `listing-header.html`, then put your name and link in the line that starts `Thanks to`.
 
@@ -134,20 +136,22 @@ cp listing-header.sample.html listing-header.html
 
 Without `listing-header.html` the pages still list the files and keep the hub's colours, but have no heading. Updating the mirror leaves your copy alone, because only the sample ships with it.
 
-On Apache the listing style needs the host to let `.htaccess` files set `Indexes` options. DreamHost does. On a host that does not, `maps/` answers 500 and `php bin/check.php --url=...` says so. To fall back to a plain listing, delete the lines under the `Listing style` comment in `maps/.htaccess`, `games/.htaccess` and `engines/.htaccess`.
+On Apache the listing style needs the host to let `.htaccess` files set `Indexes` options. DreamHost does. On a host that does not, `maps/` answers 500 and `php bin/check.php --url=...` says so. To fall back to a plain listing, delete the lines under the `Listing style` comment in the `.htaccess` file of each of those folders.
 
 ## What the mirror serves
 
 - `maps/` and `games/` hold the archives
 - `engines/` holds engine test builds that the hub's trusted uploaders publish
-- `listing.json` lists every file in `maps/`, `games/` and `engines/` with its size and SHA-256 hash
+- `replays/` holds match replays that players share. Each is named with the match's game id, so one match has one name on every mirror
+- `tracks/` holds replay tracks, which Coilbox makes from a replay so a match can be scrubbed backwards and forwards
+- `listing.json` lists every file in `maps/`, `games/`, `engines/`, `replays/` and `tracks/` with its size and SHA-256 hash
 - `catalogue.json` and `catalogue.sig` are the hub's signed catalogue and its signature
 - `limits.php` tells uploaders how large each upload chunk may be
 - `upload.php` accepts uploads from people the hub has approved
 - `identity.php` gives the mirror's ID, address and public key, and signs a challenge from the hub to prove the mirror holds its key
 - `setup.php` sets the mirror up the first time it is opened, then only shows the link to ask the hub to add it
 
-The mirror creates `listing.json`, `catalogue.json` and `catalogue.sig` itself. The web server must be able to write to `maps/`, `games/`, `engines/`, `.partial/` and `private/`.
+The mirror creates `listing.json`, `catalogue.json` and `catalogue.sig` itself. The web server must be able to write to `maps/`, `games/`, `engines/`, `replays/`, `tracks/`, `.partial/` and `private/`.
 
 ## Keep it running
 
@@ -174,6 +178,15 @@ Releases from this one on also hold engine test builds, in `engines/`.
 3. Run `php bin/check.php --url=https://mirror.example.org`.
 
 Until `https://<your mirror>/engines/` answers 200, the hub marks the mirror unhealthy and sends it no uploads or players.
+
+## Upgrade to a release with replays
+
+Releases from this one on also hold match replays in `replays/` and replay tracks in `tracks/`.
+
+1. Update the files, including the root `.htaccess`. With `git pull`, the two folders and their `.htaccess` files arrive by themselves. Otherwise upload the `replays/` and `tracks/` folders with their `.htaccess` files.
+2. Let the web server and cron write to both folders, as for `maps/`.
+3. On nginx, add `replays` and `tracks` to the folder `location` in your site config, as in `examples/nginx.conf`, then reload nginx.
+4. Run `php bin/check.php --url=https://mirror.example.org`.
 
 ## Set up by hand
 
