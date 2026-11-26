@@ -10,7 +10,7 @@ final class Listing
     private const FILE_KINDS = ['map', 'game'];
 
     /**
-     * Scans maps/, games/ and engines/ and returns a listing document. A file whose size and mtime match
+     * Scans each kind's folder and returns a listing document. A file whose size and mtime match
      * its entry in $previous keeps the SHA-256 from that entry instead of being hashed again.
      */
     public static function build(Paths $p, ?array $previous, int $now): array
@@ -48,14 +48,19 @@ final class Listing
         return $doc !== null && self::isValidDoc($doc) ? $doc : null;
     }
 
-    /** True when the document has the listing shape, with every entry well formed. Engines may be left out. */
+    /** True when the document has the listing shape, with every entry well formed. Own lists may be left out. */
     public static function isValidDoc(array $doc): bool
     {
         if (($doc['v'] ?? null) !== 1 || !is_int($doc['generated_at'] ?? null)) {
             return false;
         }
-        return self::validEntries($doc['files'] ?? null, self::FILE_KINDS)
-            && (!array_key_exists('engines', $doc) || self::validEntries($doc['engines'], ['engine']));
+        foreach (Paths::OWN_LIST_KINDS as $kind) {
+            $key = Paths::folderFor($kind);
+            if (array_key_exists($key, $doc) && !self::validEntries($doc[$key], [$kind])) {
+                return false;
+            }
+        }
+        return self::validEntries($doc['files'] ?? null, self::FILE_KINDS);
     }
 
     /** @param list<string> $kinds */
@@ -85,7 +90,8 @@ final class Listing
      */
     public static function maxDocBytes(int $entries): int
     {
-        // An engine name is far shorter than 255 bytes, so this bounds engine entries too.
+        // Engine, replay and track names are far shorter than 255 bytes and no kind is longer than "engine", so
+        // this bounds their entries too.
         $entry = Json::encode([
             'filename' => str_repeat('a', 255),
             'kind' => 'engine',
@@ -95,7 +101,8 @@ final class Listing
         ]);
         // Allow every filename byte to be escaped to six bytes, and one comma between entries.
         $maxEntry = strlen($entry) + 255 * 6 - 255 + 1;
-        $envelope = strlen(Json::encode(['v' => 1, 'generated_at' => PHP_INT_MAX, 'files' => [], 'engines' => []]));
+        $lists = array_fill_keys(['files', ...array_map(Paths::folderFor(...), Paths::OWN_LIST_KINDS)], []);
+        $envelope = strlen(Json::encode(['v' => 1, 'generated_at' => PHP_INT_MAX] + $lists));
         return $entries * $maxEntry + $envelope;
     }
 
@@ -130,10 +137,14 @@ final class Listing
         self::write($p, self::document($files, $now));
     }
 
-    /** Returns every entry, maps and games first, then engines. */
+    /** Returns every entry, maps and games first, then each own list. */
     public static function entries(array $doc): array
     {
-        return [...$doc['files'] ?? [], ...$doc['engines'] ?? []];
+        $entries = $doc['files'] ?? [];
+        foreach (Paths::OWN_LIST_KINDS as $kind) {
+            $entries = [...$entries, ...$doc[Paths::folderFor($kind)] ?? []];
+        }
+        return $entries;
     }
 
     public static function find(array $doc, string $kind, string $filename): ?array
@@ -167,14 +178,20 @@ final class Listing
     }
 
     /**
-     * Sorts by kind, then by filename in byte order. Engines go in their own list, left out when empty, so
-     * mirrors on earlier releases still accept the listing.
+     * Sorts by kind, then by filename in byte order. Each of Paths::OWN_LIST_KINDS goes in its own list, left out
+     * when empty, so mirrors on earlier releases still accept the listing.
      */
     private static function document(array $files, int $now): array
     {
         usort($files, static fn (array $a, array $b) => [$a['kind'], $a['filename']] <=> [$b['kind'], $b['filename']]);
-        $engines = array_values(array_filter($files, static fn (array $f) => $f['kind'] === 'engine'));
-        $doc = ['v' => 1, 'generated_at' => $now, 'files' => array_values(array_filter($files, static fn (array $f) => $f['kind'] !== 'engine'))];
-        return $engines === [] ? $doc : $doc + ['engines' => $engines];
+        $of = static fn (array $kinds): array => array_values(array_filter($files, static fn (array $f) => in_array($f['kind'], $kinds, true)));
+        $doc = ['v' => 1, 'generated_at' => $now, 'files' => $of(self::FILE_KINDS)];
+        foreach (Paths::OWN_LIST_KINDS as $kind) {
+            $own = $of([$kind]);
+            if ($own !== []) {
+                $doc[Paths::folderFor($kind)] = $own;
+            }
+        }
+        return $doc;
     }
 }

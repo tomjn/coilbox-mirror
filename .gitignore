@@ -9,6 +9,10 @@ games/*
 !games/.htaccess
 engines/*
 !engines/.htaccess
+replays/*
+!replays/.htaccess
+tracks/*
+!tracks/.htaccess
 /catalogue.json
 /catalogue.sig
 /listing.json

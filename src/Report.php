@@ -44,7 +44,7 @@ final class Report
             'catalogue_generated_at' => $catalogue['generated_at'] ?? null,
             'held' => $held,
             'unknown' => $unknown,
-            // Tells the hub this mirror takes engines. Mirrors on earlier releases send no kinds.
+            // The hub sends this mirror only these kinds. Mirrors on releases before engines send no kinds.
             'kinds' => Paths::KINDS,
         ]);
     }

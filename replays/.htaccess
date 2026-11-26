@@ -1,0 +1,22 @@
+# Replays only. Nothing in this folder can run.
+RemoveHandler .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc .cgi .pl .py .sh .bash .shtml .jsp .asp .aspx
+RemoveType .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .inc .cgi .pl .py .sh .bash .shtml .jsp .asp .aspx
+
+# Apache lists the folder, which is how peers and people find files.
+Options +Indexes
+DirectoryIndex disabled
+
+# Listing style: makes the listing look like the hub. The paths are relative, so they also work in a subfolder.
+# Apache adds the header only when ../listing-header.html exists. Copy it from listing-header.sample.html.
+# A host that does not let .htaccess files set Indexes options answers 500 here. Delete these lines to fall back.
+IndexOptions FancyIndexing HTMLTable SuppressIcon SuppressDescription Charset=UTF-8
+IndexStyleSheet ../listing.css
+IndexHeadInsert "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+HeaderName ../listing-header.html
+
+# Replays download. A name here is a game id, and no handler runs on it.
+<FilesMatch "\.(?i:sdfz)$">
+  Require all granted
+  # RemoveHandler does not undo a server-level SetHandler, so switch the handler off here too.
+  SetHandler None
+</FilesMatch>
